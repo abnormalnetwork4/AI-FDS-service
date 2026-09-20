@@ -85,3 +85,37 @@ class Repository:
         if not session.started_at <= event.occurred_at <= session.ended_at:
             raise ReferenceError("Event time must be within the referenced session")
         return self.save("event", event)
+
+    def replace(self, kind, record):
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE records SET payload = ? WHERE kind = ? AND id = ?",
+                (record.model_dump_json(), kind, record.id),
+            )
+            if cursor.rowcount != 1:
+                raise ReferenceError("Record not found")
+
+    def save_ingest(self, fingerprint, assessment, records):
+        """Commit all collection and analysis records together; retries are idempotent."""
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute(
+                "SELECT payload FROM records WHERE kind = 'receipt' AND id = ?", (assessment.id,)
+            ).fetchone()
+            if previous:
+                receipt = json.loads(previous["payload"])
+                if receipt["fingerprint"] != fingerprint:
+                    raise ConflictError("Event ID reused with different content")
+                row = conn.execute(
+                    "SELECT payload FROM records WHERE kind = 'assessment' AND id = ?", (assessment.id,)
+                ).fetchone()
+                return json.loads(row["payload"])
+            try:
+                for kind, record in [*records, ("assessment", assessment)]:
+                    conn.execute("INSERT INTO records VALUES (?, ?, ?, ?)",
+                                 (kind, record.id, record.user_id, record.model_dump_json()))
+                conn.execute("INSERT INTO records VALUES ('receipt', ?, ?, ?)",
+                             (assessment.id, assessment.user_id, json.dumps({"fingerprint": fingerprint})))
+            except sqlite3.IntegrityError as exc:
+                raise ConflictError("A linked record ID already exists") from exc
+        return assessment.model_dump(mode="json")

@@ -6,13 +6,17 @@ from .schemas import AIUsageEvent, BehaviorFeatures, BehaviorWindow, DashboardSu
 
 
 def build_window(repo: Repository, request: WindowRequest) -> BehaviorWindow:
+    sessions = [NetworkSession.model_validate(row) for row in repo.list("session", request.user_id)]
+    events = [AIUsageEvent.model_validate(row) for row in repo.list("event", request.user_id)]
+    return repo.save("window", compute_window(request, sessions, events))
+
+
+def compute_window(request: WindowRequest, sessions: list[NetworkSession], events: list[AIUsageEvent]) -> BehaviorWindow:
     start = request.start.astimezone(timezone.utc)
     end = start + timedelta(minutes=request.duration_minutes)
     # Snapshot semantics: sessions are attributed to the window containing their start.
-    sessions = [NetworkSession.model_validate(row) for row in repo.list("session", request.user_id)]
-    sessions = [s for s in sessions if s.device_id == request.device_id and start <= s.started_at < end]
-    events = [AIUsageEvent.model_validate(row) for row in repo.list("event", request.user_id)]
-    events = [e for e in events if e.device_id == request.device_id and start <= e.occurred_at < end]
+    sessions = [s for s in sessions if s.user_id == request.user_id and s.device_id == request.device_id and start <= s.started_at < end]
+    events = [e for e in events if e.user_id == request.user_id and e.device_id == request.device_id and start <= e.occurred_at < end]
     window = BehaviorWindow(
         id=str(uuid4()), user_id=request.user_id, device_id=request.device_id,
         start=start, end=end, duration_minutes=request.duration_minutes,
@@ -28,7 +32,7 @@ def build_window(repo: Repository, request: WindowRequest) -> BehaviorWindow:
             file_count=sum(e.file_count for e in events),
         ),
     )
-    return repo.save("window", window)
+    return window
 
 
 def dashboard(repo: Repository, user_id: str | None) -> DashboardSummary:
