@@ -1,6 +1,6 @@
 # AI 사용 위험 분석 백엔드 틀
 
-첨부 중간점검 보고서의 Data Risk Engine / Network Risk Engine, 네트워크 세션 → AI 사용 이벤트 → 행동 Window → 분석 결과 → 대시보드 흐름을 FastAPI + SQLite로 구성했습니다. Python 3.12 이상을 사용합니다. 기존 모델 실험 폴더와 독립적으로 실행됩니다.
+Data Risk Engine / Network Risk Engine, 네트워크 세션 → AI 사용 이벤트 → 행동 Window → 분석 결과 → 대시보드 흐름을 FastAPI + SQLite로 구성했습니다. Python 3.12 이상을 사용합니다. 기존 모델 실험 폴더와 독립적으로 실행됩니다.
 
 현재 구현: 입력 검증, SQLite 영속 저장, 세션과 이벤트 연결 검증, 사용자·단말별 5분/1시간 집계, 엔진 교체 인터페이스, 분석 이력 및 대시보드 조회, Swagger 명세.
 
