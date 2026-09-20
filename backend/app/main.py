@@ -25,8 +25,8 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="AI 사용 위험 분석 백엔드", version="0.1.0", lifespan=lifespan,
-        description="로그 수집·행동 집계·모델 어댑터·대시보드 API. 기본 엔진은 미연결 상태입니다.",
+        title="FDS 분석 서버", version="0.2.0", lifespan=lifespan,
+        description="Gateway와 분리된 수집·전처리·분석·조회 서버. 기본 엔진은 미연결 상태입니다.",
     )
     app.state.repository = repo
     app.state.data_engine = data_engine if data_engine is not None else StubDataRiskEngine()

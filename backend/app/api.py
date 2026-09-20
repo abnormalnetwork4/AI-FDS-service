@@ -3,6 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import services
+from .collection import ingest
+from .contracts import Assessment, FDSIngest, GatewayAudit
 from .repository import Repository
 from .schemas import AIUsageEvent, BehaviorWindow, DashboardSummary, DataRiskRequest, NetworkSession, RiskResult, WindowRequest
 
@@ -80,3 +82,26 @@ def get_risk(risk_id: str, repo: Repo):
 @router.get("/dashboard/summary", response_model=DashboardSummary, tags=["대시보드"])
 def summary(repo: Repo, user_id: str | None = None):
     return services.dashboard(repo, user_id)
+
+
+@router.post("/ingest/gateway", response_model=Assessment, tags=["Gateway 연동"])
+def ingest_gateway(body: FDSIngest, request: Request, repo: Repo):
+    return ingest(repo, body, request.app.state.data_engine, request.app.state.network_engine)
+
+
+@router.get("/gateway-audits", response_model=list[GatewayAudit], tags=["Gateway 연동"])
+def list_gateway_audits(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
+    return repo.list("gateway_audit", user_id, limit, offset)
+
+
+@router.get("/assessments", response_model=list[Assessment], tags=["통합 분석 조회"])
+def list_assessments(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
+    return repo.list("assessment", user_id, limit, offset)
+
+
+@router.get("/assessments/{event_id}", response_model=Assessment, tags=["통합 분석 조회"])
+def get_assessment(event_id: str, repo: Repo):
+    result = repo.get("assessment", event_id)
+    if result is None:
+        raise HTTPException(404, "Assessment not found")
+    return result

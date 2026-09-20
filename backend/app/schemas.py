@@ -30,6 +30,7 @@ class NetworkSession(Model):
     packets_received: Count = 0
     via_gateway: bool
     connection_action: Literal["allow", "block", "unknown"] = "unknown"
+    source: Literal["collector", "gateway_application"] = "collector"
 
     @model_validator(mode="after")
     def valid_interval(self):
@@ -118,6 +119,7 @@ class RiskResult(Model):
     engine: Literal["data", "network"]
     engine_version: str
     window_id: str | None = None
+    source_event_id: str | None = None
     status: Literal["pending", "complete", "error"]
     score: Score | None = None
     findings: list[Finding]
