@@ -1,0 +1,5 @@
+/* 대시보드는 자체 밝은 테마를 사용합니다. Vite 예제의 중앙 정렬/다크 테마를 제거합니다. */
+:root { font-family: system-ui, "Malgun Gothic", sans-serif; color: #252936; background: #f5f6f8; color-scheme: light; font-synthesis: none; }
+body { margin: 0; }
+#root { min-height: 100vh; }
+button, input, select { font: inherit; }
