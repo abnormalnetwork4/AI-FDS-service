@@ -1,66 +1,75 @@
-# AI-FDS-service · 리스크 대시보드 (Frontend)
+# FDS 사후 분석 대시보드
 
-VPN 세션의 네트워크 · 프롬프트 위험도를 통합해서 보여주는 보안 모니터링 대시보드입니다.
-현재는 **더미 데이터로 동작하는 UI 목업** 단계이며, UI는 계속 수정될 수 있습니다.
+React 화면에서 백엔드에 저장된 캡처와 분석 결과를 조회합니다. 기본값은 실제 API 연결이며 5초마다 최근 200건을 갱신합니다. 검색·필터·CSV 내보내기는 불러온 최근 200건을 대상으로 합니다. 상단에 전체 건수도 별도로 표시합니다.
 
-## 실행 방법
+## 실행 (Windows, Docker 불필요)
 
-```bash
+Python 3.12와 Node.js 22.12 이상을 준비합니다. 두 터미널 모두 저장소 루트에서 시작합니다.
+
+첫 번째 터미널 — 백엔드:
+
+```powershell
+cd backend
+# 최초 한 번만 환경 생성 및 설치
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+두 번째 터미널 — 화면:
+
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-## 구조
+http://127.0.0.1:5173 을 엽니다. Vite가 `/api` 요청을 `http://127.0.0.1:8000`으로 전달합니다. 백엔드가 꺼져 있으면 연결 실패를 표시하며 샘플 데이터로 자동 전환하지 않습니다. 포트가 사용 중이면 기존 서버를 확인하세요.
 
+처음에는 빈 화면이 정상입니다. 세 번째 터미널에서 예시를 보내면 캡처 2건이 나타납니다.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe examples/passive_demo.py
 ```
-frontend/
-  src/
-    components/
-      RiskDashboard.jsx   ← 대시보드 전체 (데이터 레이어 + 화면)
-    App.jsx               ← RiskDashboard 렌더링
-```
 
-`RiskDashboard.jsx`는 크게 3부분으로 나뉩니다.
+예시는 가상 관측 자료를 DB에 추가합니다. 실제 패킷 캡처나 AI 요청을 발생시키지 않습니다. 수집기·모델 연결은 [백엔드 안내](../backend/README.md)를 참고하세요.
 
-1. **DATA LAYER** (파일 상단) — 백엔드 연동 지점. 화면 코드는 `useEvents()` 결과만 사용합니다.
-2. **순수 함수** — 등급 계산, 정렬, 핵심 원인 추출, CSV
-3. **UI 컴포넌트** — 화면
+## 화면 표시 기준
 
-## 백엔드 연동 방법
+- 캡처 선택, 사용자·캡처/세션 ID·단말 검색, 등급 필터, 정렬, CSV 내보내기를 지원합니다.
+- Network 분석은 5분/60분 집계를 구분합니다. Data 분석은 별도 앱 로그 확보 여부에 따라 표시합니다.
+- 모델이 없는 현재 상태는 `미판정`입니다. 없는 점수·신뢰도·기여도를 숫자로 만들어 채우지 않습니다.
+- 실제 모델 연결 후 개별 완료 항목 점수는 표시됩니다. 통합 등급 정책은 별도 구현 대상이며 엔진 점수를 임의로 합산하지 않습니다.
+- `분석 요약 보기`는 저장된 근거를 정리합니다. 외부 LLM 호출이나 자동 접속 차단은 수행하지 않습니다.
+- 연결이 끊기면 마지막 수신 자료와 연결 실패 안내를 표시합니다.
 
-파일 상단의 설정 두 줄만 바꾸면 됩니다.
-
-```js
-const USE_MOCK = true;                    // false 로 변경
-const API_BASE = "http://localhost:8000"; // 서버 주소로 교체
-```
+## API와 구성
 
 | 용도 | 요청 | 응답 |
 |---|---|---|
-| 이벤트 목록 | `GET {API_BASE}/api/events` | 이벤트 배열 (또는 `{ events: [...] }`) |
-| AI 설명 | `POST {API_BASE}/api/explain` (`{ event_id, evidence }`) | `{ text }` |
+| 캡처별 분석 목록 | `GET /api/v1/dashboard/events?limit=200` | `{events, total, limit, offset}` |
+| 저장된 근거 요약 | `GET /api/v1/dashboard/explanation?capture_id=...` | `{text, source: "stored"}` |
 
-### 이벤트 필드
+목록 API는 `user_id`, `limit`(1~200), `offset`을 지원하며 UI는 첫 페이지를 조회합니다. 원문 프롬프트는 목록 응답에 포함하지 않습니다.
 
-`normalizeEvent()`가 아래 필드를 받아 화면용으로 변환합니다. 백엔드 필드명이 다르면 **이 함수 한 곳만 수정**하면 됩니다.
+- `src/lib/events.js`: API 응답 변환과 미판정 처리
+- `src/components/RiskDashboard.jsx`: 갱신·검색·선택 및 화면
+- `vite.config.js`: 개발/미리보기 API 프록시
+- `../backend/app/dashboard.py`: 저장 결과를 화면용 응답으로 변환
 
+`.env.example`을 `.env.local`로 복사하면 설정을 바꿀 수 있습니다. 변경 후 Vite를 재시작하세요.
+
+- `VITE_USE_MOCK=false`: 기본값, 실제 API 사용. `true`일 때만 DEMO 화면을 표시합니다.
+- `VITE_API_BASE_URL=`: 기본값은 동일 출처 `/api`. 다른 서버 URL을 지정하면 백엔드 `CORS_ORIGINS`에 화면 주소를 허용해야 합니다. 프론트 환경변수에는 비밀 키를 넣지 않습니다.
+
+## 검증·빌드
+
+```powershell
+npm test
+npm run lint
+npm run build
+npm run preview
 ```
-id (또는 event_id), user (또는 user_name), dept (또는 department),
-started_at, score, confidence,
-network_reasons: [{ code, label, detail, status, weight }],
-prompt_reasons:  [{ code, label, detail, status, weight }]
-```
 
-- `status`: `danger` | `caution` | `safe`
-- `score`: 0~100 (70 이상 위험, 40 이상 주의)
-
-### 주의
-
-- 현재 `USE_MOCK = true`일 때만 `api.anthropic.com`을 브라우저에서 직접 호출하는 미리보기용 코드가 동작합니다. 실서비스에서는 반드시 `/api/explain` 백엔드 프록시를 거쳐야 합니다 (API 키 노출 / CORS 방지).
-- Claude API 키는 프론트 코드에 넣지 않고 서버에만 보관합니다.
-
-## 사용 라이브러리
-
-- [recharts](https://recharts.org/) — 차트
-- [lucide-react](https://lucide.dev/) — 아이콘
+빌드는 `dist/`에 생성됩니다. 미리보기는 http://127.0.0.1:4173 이며 백엔드 8000번 포트도 실행해야 합니다. 실제 배포 시 정적 파일 서버에 `dist/`를 배치하고 `/api`를 FDS로 연결합니다. Vite 개발 서버는 운영용 서버가 아닙니다. 사내 공개 전 관리자 인증·권한과 수집기 인증은 별도 구현해야 합니다.

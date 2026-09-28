@@ -714,7 +714,7 @@ export default function RiskDashboard() {
     const q = query.trim().toLowerCase();
     let list = events.filter((s) => {
       const matchesQuery =
-        q === "" || s.user.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || s.dept.toLowerCase().includes(q);
+        q === "" || [s.user, s.id, s.sessionId ?? "", s.dept].some((value) => value.toLowerCase().includes(q));
       const matchesFilter = filter === "all" || eventLevel(s) === filter;
       return matchesQuery && matchesFilter;
     });
@@ -748,7 +748,7 @@ export default function RiskDashboard() {
   }
 
   function exportCsv() {
-    const header = ["캡처ID", "세션ID", "사용자", "단말", "점수", "등급", "예측신뢰도", "접속시간"];
+    const header = ["캡처ID", "세션ID", "사용자", "단말", "점수", "등급", "예측신뢰도", "관측시간"];
     const rows = filtered.map((s) => [
       s.id,
       s.sessionId ?? s.id,
@@ -1077,7 +1077,7 @@ export default function RiskDashboard() {
             <div className="search-box">
               <Search size={14} color="#8B8F99" />
               <input
-                placeholder="사용자·캡처ID·단말 검색"
+                placeholder="사용자·캡처/세션ID·단말 검색"
                 aria-label="세션 검색"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
