@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from . import services
+from . import services, dashboard
 from .collection import ingest
 from .contracts import Assessment, CaptureIngest, CaptureRecord
 from .repository import Repository
@@ -87,6 +87,22 @@ def get_risk(risk_id: str, repo: Repo):
 @router.get("/dashboard/summary", response_model=DashboardSummary, tags=["대시보드"])
 def summary(repo: Repo, user_id: str | None = None):
     return services.dashboard(repo, user_id)
+
+
+@router.get("/dashboard/events", response_model=dashboard.DashboardPage, tags=["대시보드"])
+def dashboard_events(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
+    pairs, windows, total = repo.dashboard_page(user_id, limit, offset)
+    return dashboard.DashboardPage(events=[dashboard.present(a, s, windows) for a, s in pairs],
+                                   total=total, limit=limit, offset=offset)
+
+
+@router.get("/dashboard/explanation", response_model=dashboard.Explanation, tags=["대시보드"])
+def dashboard_explanation(repo: Repo, capture_id: str):
+    # 브라우저가 만든 근거가 아니라 저장된 분석 결과만 요약합니다.
+    raw = repo.get("passive_assessment", capture_id)
+    if raw is None:
+        raise HTTPException(404, "Assessment not found")
+    return dashboard.explain(raw)
 
 
 @router.post("/ingest/captures", response_model=Assessment, tags=["사후 분석 수집"])

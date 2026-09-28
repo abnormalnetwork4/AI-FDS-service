@@ -94,6 +94,29 @@ class Repository:
             raise ReferenceError("Event time must be within the referenced session")
         return self.save("event", event)
 
+    def dashboard_page(self, user_id=None, limit=50, offset=0):
+        # 한 읽기 트랜잭션에서 총 건수와 해당 페이지의 연결 기록을 가져옵니다.
+        where = "a.kind = 'passive_assessment'"
+        params = []
+        if user_id is not None:
+            where += " AND a.user_id = ?"
+            params.append(user_id)
+        with self.connection() as conn:
+            conn.execute("BEGIN")
+            total = conn.execute(f"SELECT COUNT(*) FROM records a WHERE {where}", params).fetchone()[0]
+            rows = conn.execute(f"""SELECT a.payload AS assessment, s.payload AS session
+                FROM records a JOIN records s ON s.kind = 'session'
+                AND s.id = json_extract(a.payload, '$.session_id')
+                WHERE {where} ORDER BY a.rowid DESC LIMIT ? OFFSET ?""", [*params, limit, offset]).fetchall()
+            pairs = [(json.loads(r["assessment"]), json.loads(r["session"])) for r in rows]
+            ids = list({r["window_id"] for a, _ in pairs for r in a["results"] if r.get("window_id")})
+            windows = {}
+            if ids:
+                marks = ",".join("?" for _ in ids)
+                windows = {r["id"]: json.loads(r["payload"]) for r in conn.execute(
+                    f"SELECT id, payload FROM records WHERE kind = 'window' AND id IN ({marks})", ids)}
+        return pairs, windows, total
+
     def observation_snapshot(self, user_id):
         # 한 번의 SELECT로 읽어 세션 조회와 이벤트 조회 사이에 다른 수집이 끼어드는 것을 방지합니다.
         with self.connection() as conn:
