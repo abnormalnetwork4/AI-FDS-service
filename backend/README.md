@@ -1,160 +1,122 @@
-# 사내 AI Gateway + FDS 백엔드
+# Out-of-Path FDS 백엔드
 
-사내에 설치한 AI를 사용하는 환경의 기본 구조입니다. **Gateway는 요청을 통제하고 전달하며, FDS는 별도 경로로 받은 기록을 분석합니다.** FastAPI + SQLite, Python 3.12 이상을 사용합니다.
-
-## 전체 흐름
+**원본 트래픽은 그대로 흐르고, FDS는 별도로 수집한 복사본을 사후 분석합니다.** 사용자와 AI 사이에서 요청을 전달하거나 허용·차단하지 않습니다. FastAPI + SQLite 기반 백엔드 기본 틀입니다.
 
 ```mermaid
 flowchart LR
-    U[사내 AI 사용자] --> G[Gateway: 정책 검사]
-    G -->|허용 요청| M[사내 AI 모델]
-    M -->|응답| G
-    G -->|답변 또는 차단 사유| U
-    G -.->|응답 후 정책 로그·사용 문맥| C[FDS 수집·전처리]
-    P[패킷·Flow 수집기: 후속 연동] -.->|메타데이터| C
-    C --> D[Data Risk Engine]
-    C --> N[Network Risk Engine]
-    D --> R[분석 결과 묶음·통합 판단 연결 지점]
-    N --> R
-    R --> DB[결과 저장·조회 API]
-    DB --> UI[관리자 화면: 후속 구현]
+    U[사용자] <-->|원본 통신| AI[기존 사내 AI]
+    C[외부 패킷·Flow 수집기] -.->|관측 메타데이터 복사본| F[FDS 수집·저장]
+    L[별도 AI 사용 로그] -.->|선택: 프롬프트·사용 문맥| F
+    F --> N[Network Risk Engine]
+    F --> D[Data Risk Engine: 원문 확보 시]
+    N --> R[분석 결과 저장·조회 API]
+    D --> R
+    R --> UI[탐지 대시보드: 후속 구현]
 ```
 
-- Gateway는 모델 허용 목록과 입력 크기를 검사합니다. 허용 요청만 사내 모델 어댑터를 호출하며, 내용의 안전성을 판단하는 모델 검사는 아직 하지 않습니다.
-- FDS는 요청 기록이 들어오면 최근 5분/1시간 집계를 만들고 두 종류의 엔진을 병렬 호출합니다. 5분이나 1시간이 끝날 때까지 기다리는 배치가 아닙니다.
-- FDS 결과가 Gateway 정책을 자동 변경하지 않습니다. 즉시 요청 통제와 사후 분석은 별개입니다.
-- 기본 탐지 모델은 `pending`, `score: null`, 통합 위험 등급은 `unassessed`입니다. 미분석은 정상 판정이 아닙니다.
+수집기는 미러링된 트래픽이나 저장된 캡처를 읽어 API 계약에 맞는 JSON으로 전달하는 외부 구성 요소입니다. 이 저장소가 NIC에서 패킷을 캡처하거나 PCAP 파일을 직접 해석하지는 않습니다. 수집기를 원본 요청 경로와 분리해야 FDS 장애나 분석 지연이 원본 AI 통신을 멈추지 않습니다.
 
-## 실행
+## 현재 구현
 
-저장소 루트에서 PowerShell:
+관측된 세션·선택적인 AI 사용 로그 수신, 사용자·단말·세션·시간 연결 검증, 관측 자료 우선 저장, 최근 5분/1시간 집계, Data/Network 엔진 연결, 재전송 중복 방지, 결과·통계 조회를 구현했습니다.
+
+실제 탐지 모델은 미연결입니다. `status: pending`, `score: null`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
+
+## 설치·실행
+
+Python 3.12와 Git이 설치된 Windows에서 저장소 루트 기준:
 
 ```powershell
 cd backend
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-```
-
-아래 세 명령을 각각 별도 터미널에서, 모두 `backend` 폴더 기준으로 실행합니다.
-
-```powershell
-# 터미널 1: FDS
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-# 터미널 2: 사내 AI 연결 테스트용 모형
-.\.venv\Scripts\python.exe -m uvicorn app.demo_model:app --host 127.0.0.1 --port 8002
-# 터미널 3: Gateway
-.\.venv\Scripts\python.exe -m uvicorn app.gateway:app --host 127.0.0.1 --port 8001
 ```
 
-| 서비스 | API 문서 | 기본 DB |
-|---|---|---|
-| FDS | http://127.0.0.1:8000/docs | `data/backend.sqlite3` |
-| Gateway | http://127.0.0.1:8001/docs | `data/gateway.sqlite3` |
-| 테스트용 AI | http://127.0.0.1:8002/docs | 없음 |
+**FDS 서버 하나만 실행합니다.** Gateway나 데모 AI 서버는 필요 없습니다.
 
-`demo_model`은 고정 문장을 반환하는 통신 확인용 서버입니다. 실제 AI 추론을 하지 않으며 Gateway 응답에 `model_mode: demo`가 표시됩니다.
+- API 테스트 화면: http://127.0.0.1:8000/docs
+- 상태: http://127.0.0.1:8000/health
+- 기본 DB: `backend/data/passive-fds.sqlite3`
+- DB 변경: 서버 시작 전 `$env:DATABASE_PATH = '원하는파일경로'`
+- 브라우저 조회 허용 주소: `CORS_ORIGINS` (기본 `http://localhost:3000,http://localhost:5173`)
 
-## 요청 예시
+## 관측 자료 전송
 
-Gateway Swagger의 `POST /api/v1/chat`에서 다음 내용을 실행하세요.
+`POST /api/v1/ingest/captures`에 다음처럼 보냅니다. AI 사용 명령이 아니라 이미 관측한 통신 기록의 복사본입니다.
 
 ```json
 {
-  "user_id": "employee-1",
-  "device_id": "pc-1",
-  "model": "local-demo",
-  "text": "회의록을 요약해 주세요.",
-  "input_origin": "direct_user"
+  "id": "capture-001",
+  "session": {
+    "id": "flow-001",
+    "user_id": "employee-1",
+    "device_id": "pc-1",
+    "started_at": "2026-09-28T10:00:00+09:00",
+    "ended_at": "2026-09-28T10:00:01+09:00",
+    "destination": "local-ai.internal",
+    "bytes_sent": 1024,
+    "bytes_received": 2048,
+    "source": "packet_capture"
+  }
 }
 ```
 
-허용 요청은 HTTP 200과 답변을 반환합니다. 모델을 `unapproved-model`로 바꾸면 403으로 차단하며 모델을 호출하지 않습니다. 모델 타임아웃은 504, 모델 오류/잘못된 응답은 502입니다.
+프롬프트가 없어도 Network 분석은 진행합니다. `ai_event`와 `prompt`는 선택 항목입니다. 프롬프트를 확보했다면 같은 세션에 연결된 `ai_event`와 함께 전송합니다. `/docs`의 스키마와 `examples/passive_demo.py`에 예시가 있습니다.
 
-반환된 `request_id`로 Gateway의 `/api/v1/requests/{request_id}`와 FDS의 `/api/v1/assessments/{request_id}`에서 같은 요청의 정책 기록과 분석 결과를 확인할 수 있습니다. FDS는 응답 후 처리하므로 결과가 잠시 후 나타날 수 있습니다. 응답의 `fds_delivery: pending`은 발송 예약 상태이고, 최신 전송 상태는 Gateway 상세 조회에서 확인합니다. `delivered`는 FDS API 처리 완료이며 모델 분석 완료를 의미하지 않습니다.
+HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용자를 알아낼 수는 없습니다. 프롬프트는 별도 앱 로그에서 확보하고, 사용자·단말은 수집기가 자산/사용자 매핑을 통해 연결해야 합니다. 미식별 대상은 실제 직원 계정처럼 만들지 말고 수집기에서 구분 가능한 관측용 식별자를 사용합니다.
 
-## 구성과 API
+`via_gateway`는 기존 네트워크 경로의 관측값이며 FDS 제어 설정이 아닙니다. 미확인이면 생략/null로 보내며, 미확인을 우회 접속으로 집계하지 않습니다. `connection_action`과 이벤트의 `policy_action`도 외부 시스템에서 관측한 값이고 이 서버가 실행하는 명령이 아닙니다.
 
-| 파일 | 역할 |
-|---|---|
-| `app/gateway.py` | Gateway 앱, 정적 정책, 요청 처리 |
-| `app/gateway_clients.py` | 사내 모델·FDS HTTP 연결 인터페이스 |
-| `app/contracts.py` | Gateway/FDS/모델 간 계약 |
-| `app/demo_model.py` | 테스트용 고정 응답 서버 |
-| `app/main.py`, `app/api.py` | FDS 앱과 API |
-| `app/collection.py` | 수집, 사용자·세션 연계, 최근 Window, 병렬 분석 |
-| `app/services.py` | 집계 및 대시보드 통계 |
-| `app/engines.py` | Data/Network 엔진 Protocol과 미연결 구현 |
-| `app/schemas.py`, `app/repository.py` | 데이터 계약, 저장소, 트랜잭션, 중복 처리 |
+## 조회 API
 
-Gateway API:
+| Method | 경로 | 역할 |
+|---|---|---|
+| POST | `/api/v1/ingest/captures` | 관측 자료 저장 후 사후 분석 |
+| GET | `/api/v1/captures` | 수집 기록·프롬프트 확보 상태 |
+| GET | `/api/v1/assessments` | 캡처별 분석 묶음 |
+| GET | `/api/v1/assessments/{capture_id}` | Data 1개 + Network 5분/1시간 2개 결과 |
+| POST / GET | `/api/v1/network-sessions` | 세션 개별 등록/조회 |
+| POST / GET | `/api/v1/ai-usage-events` | AI 사용 이벤트 개별 등록/조회 |
+| POST / GET | `/api/v1/behavior-windows` | 지정 구간 집계 생성/조회 |
+| POST | `/api/v1/data-risk/analyze` | 독립 프롬프트 분석 |
+| POST | `/api/v1/network-risk/analyze/{window_id}` | 독립 행동 집계 분석 |
+| GET | `/api/v1/risks`, `/api/v1/risks/{risk_id}` | 엔진 결과 목록/상세 |
+| GET | `/api/v1/dashboard/summary` | 수집량·분석 건수·완료 점수 평균 |
 
-- `POST /api/v1/chat`: 정책 검사 → 사내 AI 호출 → 별도 FDS 전달
-- `GET /api/v1/requests`, `GET /api/v1/requests/{request_id}`: 정책·모델 처리·FDS 전달 상태
-- `GET /health`: 설정 모드 확인. 의존 서비스의 준비 상태 검사와는 다릅니다.
+목록은 `user_id`, `limit`(기본 50, 최대 200), `offset`을 지원합니다. 개별 세션/이벤트 등록은 저장만 수행합니다. 자동 분석은 캡처 수집 API에서 실행합니다. 대시보드 평균은 완료된 엔진 호출 점수의 단순 평균이며 통합 등급이 아닙니다. 현재 대시보드 화면은 없고 화면에서 사용할 조회 API까지 구현돼 있습니다.
 
-FDS API:
+## 수집·분석 처리 기준
 
-- `POST /api/v1/ingest/gateway`: 로그와 프롬프트 수집, 집계, 엔진 호출
-- `GET /api/v1/gateway-audits`: 수집된 정책 로그
-- `GET /api/v1/assessments`, `GET /api/v1/assessments/{event_id}`: 요청별 Data 1개 + Network 5분/1시간 2개 결과 묶음
-- `POST / GET /api/v1/network-sessions`: 네트워크 세션 등록/조회
-- `POST / GET /api/v1/ai-usage-events`: AI 사용 이벤트 등록/조회
-- `POST / GET /api/v1/behavior-windows`: 지정 구간 집계 생성/조회
-- `POST /api/v1/data-risk/analyze`: 독립적인 프롬프트 분석
-- `POST /api/v1/network-risk/analyze/{window_id}`: 독립적인 Window 분석
-- `GET /api/v1/risks`, `GET /api/v1/risks/{risk_id}`: 엔진 결과 목록/상세
-- `GET /api/v1/dashboard/summary`: 수집·분석 건수와 완료 점수 평균
-- `GET /health`: DB 연결과 엔진 종류 확인
+수집기는 완료된 세션을 안정적인 ID로 전송하고 재시도 시 같은 ID와 내용을 보내야 합니다. 같은 캡처 ID·내용은 결과를 중복 저장하지 않습니다. 동일 ID의 내용 변경이나 기존 세션/이벤트 ID 충돌은 409, 잘못된 연결/입력은 422, 없는 결과는 404입니다. 스트리밍 Flow 갱신·여러 캡처에 걸친 세션 병합은 미지원입니다.
 
-목록은 `user_id`, `limit`(기본 50, 최대 200), `offset`을 지원합니다. 사용자 필터는 접근 제어가 아닙니다. 대시보드 평균은 완료된 엔진 호출 점수의 단순 평균이며 통합 위험 등급이 아닙니다.
+관측 자료와 `processing` 상태를 먼저 커밋한 뒤 분석합니다. 앞선 모델 실행이 느려도 이미 수집된 기록은 다음 집계에 포함될 수 있습니다. 세션과 이벤트는 같은 조회 시점으로 읽습니다. 분석 중 프로세스가 종료됐다면 수집기가 같은 자료를 재전송해 재시도할 수 있습니다. 동시 재전송으로 모델이 중복 실행될 수는 있지만 결과는 한 번만 저장됩니다.
 
-FDS 수집은 관련 레코드를 한 트랜잭션으로 저장합니다. 같은 이벤트 ID와 같은 내용의 재전송은 기존 결과를 반환하며, 다른 내용을 같은 ID로 보내면 409입니다. 재전송으로 모델을 재분석하지 않습니다. 입력 오류는 422, 없는 결과는 404입니다.
+수집 API는 분석까지 수행한 뒤 응답합니다. 이것은 원본 AI 통신과 분리된 수집기→FDS 통신입니다. 수집기 버퍼·영속 작업 큐·자동 재시도는 별도 구현 대상입니다.
 
-## 모델 연결
+집계는 관측 세션 종료 시각 기준 최근 5분/1시간을 봅니다. 세션 전송량은 시작 시각에 귀속합니다. 긴 세션의 바이트 분할, 늦게 도착한 기록으로 과거 결과 재계산, 개인별 기준선은 후속 구현 영역입니다.
 
-**사내 생성 AI:** `ModelClient.generate()`를 실제 모델 API에 맞게 구현하거나 현재 HTTP 계약에 맞는 래퍼를 둡니다. 기본 계약은 `POST /generate`, 요청 `{model, text, input_origin}`, 응답 `{text, mode: "model"}`입니다. 자체 정의한 계약으로 Ollama/vLLM 등에 바로 호환되는 API는 아닙니다. 생성 AI와 FDS 위험 탐지 모델은 다른 역할입니다.
+## 프롬프트·모델 연결
 
-**FDS 탐지 모델:** `DataRiskEngine.analyze()` / `NetworkRiskEngine.analyze()` 구현을 `create_app()`에 주입합니다. Data는 민감정보·업무 외 오남용·토큰 낭비/모델 추출·모델 교란, Network는 N1~N6 항목입니다. 두 엔진 종류는 병렬 호출하고 같은 Network 엔진의 5분/1시간 분석은 순차 호출합니다. 여러 HTTP 요청 간 동시 호출 안전성은 어댑터에서 관리해야 합니다.
+원문은 앞뒤 공백·개행을 보존해 모델에 전달하며 DB에는 저장하지 않습니다. 수집 입력 상한은 131,072자, 현재 Data 모델 계약은 16,384자입니다. 모델 상한을 넘는 관측은 메타데이터를 저장하고 `prompt_too_large`로 표시합니다. 수집 상한보다 큰 원문은 수집기에서 생략하고 메타데이터만 보내야 합니다. 원문이 없거나 비어 있으면 Data 모델을 호출하지 않습니다.
 
-점수는 0~100 계약입니다. 분류 확률을 전체 위험 점수와 동일시하지 마세요. `input_origin`을 유지해 외부 문서·도구 출력을 직접 사용자 지시와 구분합니다. 엔진 실패는 `error`로 남고 다른 엔진 결과는 보존됩니다. 원문을 근거 문자열에 그대로 복사하지 않는 어댑터를 작성해야 합니다.
+`app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)`를 구현해 `app/main.py`의 `create_app()`에 전달합니다. 학습 때의 전처리·특징 순서·점수 의미를 유지하고 원문을 결과 근거에 그대로 복사하지 않도록 구현합니다. 자세한 연결 위치는 한국어 코드 주석을 참고하세요.
 
-**통합 판단:** 결과 묶음과 `fusion_status`, `final_grade`, `reason` 응답 틀만 있습니다. 현재 `fusion_status: pending`, `final_grade: unassessed`이며 등급 기준과 Gateway 차단 피드백은 후속 구현 영역입니다.
+실제 ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한, 대시보드 화면은 후속 작업입니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
 
-## 환경 변수
+## 이전 Gateway 버전에서 변경된 점
 
-PowerShell에서 서버 시작 전 `$env:변수명 = '값'`으로 지정합니다. `.env` 파일을 자동으로 읽지 않습니다.
-
-| 변수 | 기본값 |
-|---|---|
-| `GATEWAY_ALLOWED_MODELS` | `local-demo` (쉼표 구분) |
-| `GATEWAY_MAX_PROMPT_BYTES` | `8192` (UTF-8 바이트) |
-| `MODEL_BASE_URL` | `http://127.0.0.1:8002` |
-| `FDS_BASE_URL` | `http://127.0.0.1:8000` |
-| `MODEL_TIMEOUT_SECONDS` | `30` |
-| `FDS_TIMEOUT_SECONDS` | `10` |
-| `GATEWAY_DATABASE_PATH` | `data/gateway.sqlite3` |
-| `DATABASE_PATH` | `data/backend.sqlite3` |
-| `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` (FDS API) |
-
-HTTP 목적지는 운영자 설정으로 고정합니다. 사용자 요청으로 URL을 받지 않으며 외부 프록시 환경 변수와 리다이렉트를 사용하지 않습니다. 타임아웃은 HTTP 작업 단위입니다.
-
-## 현재 범위와 제한
-
-- 로컬 개발용입니다. 사용자·단말 ID는 요청 본문을 사용하는 데모 식별값입니다. SSO, 자료 접근 권한, 서비스 간 인증, 관리자 권한은 미구현입니다. 실제 서비스에서는 검증된 로그인에서 식별자를 가져와야 합니다.
-- Gateway는 이 API를 통과하는 요청에 적용됩니다. 모델 서버 직접 접속을 막는 네트워크 구성, 투명 프록시/TLS 가로채기는 포함하지 않습니다.
-- FDS 전달은 응답 후 프로세스 내 `BackgroundTasks`로 수행합니다. 영속 큐·자동 재시도·스케줄러는 없습니다. 프로세스 종료 시 미전송 작업이 유실되고 `pending`이 남을 수 있습니다. FDS 전송 실패는 모델의 성공 응답을 실패로 바꾸지 않으며 `failed`로 기록합니다. 타임아웃 후 FDS 처리가 완료될 가능성도 있습니다. 운영 단계에는 보호된 이벤트 큐와 재시도·상태 확인이 필요합니다.
-- 프롬프트·답변 원문은 DB에 저장하지 않습니다. 프롬프트는 분석 동안 메모리와 Gateway→FDS 요청에 포함됩니다. 기록만으로 원문 분석을 재실행할 수 없습니다. 저장된 요청 지문은 중복 확인용 SHA-256이며 원문 암호화 저장물이 아닙니다.
-- Gateway 세션은 `source: gateway_application`이고 바이트 수는 완료 요청/응답 텍스트의 UTF-8 크기 추정입니다. 패킷 계측값이 아니며 실패 요청의 실제 전송량은 알 수 없어 0으로 둡니다. 패킷/Flow 수집기는 별도 연결하고 동일 통신을 중복 집계하지 않도록 상관관계를 맞춰야 합니다.
-- 최근 Window는 요청 시작 시점 기준 이미 저장된 기록과 이번 요청을 포함합니다. 늦게 도착하거나 동시 처리 중인 기록은 기존 스냅샷에 자동 반영되지 않습니다. 수동 Window는 `[start, end)`이며 세션 전체 바이트를 시작 시각에 귀속합니다.
-- 스트리밍·대화 이력·파일 업로드·응답 검사·실제 ML 모델·자동 차단 피드백·대시보드 화면은 후속 구현 영역입니다. 자료 민감도와 이용 권한에 따른 정책도 별도 설계해야 합니다.
-- SQLite JSON 저장소와 메모리 집계는 기본 틀입니다. 대규모 데이터에는 정규화 DB·시간 인덱스·별도 작업 큐가 필요합니다.
+- `app.gateway`, `app.gateway_clients`, `app.demo_model`과 관련 데모·테스트를 제거했습니다.
+- `/api/v1/ingest/gateway`를 `/api/v1/ingest/captures`로 교체했습니다. 요청 JSON도 변경됐습니다.
+- 기본 DB를 `passive-fds.sqlite3`로 분리했습니다. 기존 `backend.sqlite3`와 `gateway.sqlite3`는 삭제하거나 자동 변환하지 않습니다.
+- 사용자 필터는 인증이 아닙니다. 로컬 개발용이며 사내 공개 전 수집기 인증과 관리자 권한을 구현해야 합니다.
 
 ## 검증
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-# 임시 포트로 서버 3개를 실행해 HTTP 통신을 확인하고 종료
-.\.venv\Scripts\python.exe examples/smoke_gateway.py
+# FDS가 실행 중일 때 별도 터미널에서 관측 예시 전송
+.\.venv\Scripts\python.exe examples/passive_demo.py
 ```
 
-`examples/demo.py`는 기존 FDS 단독 API 예제입니다. 테스트 데이터는 임시 위치 또는 Git에서 제외한 `data/` 아래에 저장됩니다.
+데모는 가상 캡처 메타데이터와 앱 로그를 전송합니다. 실제 트래픽 생성·패킷 캡처·AI 호출은 하지 않습니다. 반복 실행 시 새 ID로 기록이 추가됩니다.

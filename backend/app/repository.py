@@ -94,40 +94,57 @@ class Repository:
             raise ReferenceError("Event time must be within the referenced session")
         return self.save("event", event)
 
-    def replace(self, kind, record):
-        # Gateway의 처리·FDS 전달 상태를 갱신할 때 사용합니다. 없는 기록을 새로 만들지는 않습니다.
+    def observation_snapshot(self, user_id):
+        # 한 번의 SELECT로 읽어 세션 조회와 이벤트 조회 사이에 다른 수집이 끼어드는 것을 방지합니다.
         with self.connection() as conn:
-            cursor = conn.execute(
-                "UPDATE records SET payload = ? WHERE kind = ? AND id = ?",
-                (record.model_dump_json(), kind, record.id),
-            )
-            if cursor.rowcount != 1:
-                raise ReferenceError("Record not found")
+            rows = conn.execute("SELECT kind, payload FROM records WHERE user_id = ? AND kind IN ('session', 'event')",
+                                (user_id,)).fetchall()
+        sessions = [NetworkSession.model_validate_json(row["payload"]) for row in rows if row["kind"] == "session"]
+        events = [AIUsageEvent.model_validate_json(row["payload"]) for row in rows if row["kind"] == "event"]
+        return sessions, events
 
-    def save_ingest(self, fingerprint, assessment, records):
-        """Commit all collection and analysis records together; retries are idempotent."""
-        # 수집 로그, 집계, 분석 결과를 모두 저장하거나 모두 취소합니다. 일부만 남는 상황을 막습니다.
+    def record_capture(self, fingerprint, capture, assessment, session, event):
+        # 관측 자료를 분석 전에 확정합니다. 느린 모델 때문에 다음 집계에서 앞선 통신이 빠지지 않게 합니다.
         with self.connection() as conn:
-            # 동시에 같은 이벤트가 들어오더라도 중복 확인과 저장을 하나의 쓰기 트랜잭션에서 처리합니다.
             conn.execute("BEGIN IMMEDIATE")
             previous = conn.execute(
-                "SELECT payload FROM records WHERE kind = 'receipt' AND id = ?", (assessment.id,)
+                "SELECT payload FROM records WHERE kind = 'passive_receipt' AND id = ?", (capture.id,)
             ).fetchone()
             if previous:
-                # 같은 ID·같은 내용의 재전송은 기존 결과를 반환하고, 같은 ID·다른 내용은 거절합니다.
                 receipt = json.loads(previous["payload"])
                 if receipt["fingerprint"] != fingerprint:
-                    raise ConflictError("Event ID reused with different content")
+                    raise ConflictError("Capture ID reused with different content")
                 row = conn.execute(
-                    "SELECT payload FROM records WHERE kind = 'assessment' AND id = ?", (assessment.id,)
+                    "SELECT payload FROM records WHERE kind = 'passive_assessment' AND id = ?", (capture.id,)
                 ).fetchone()
                 return json.loads(row["payload"])
             try:
-                for kind, record in [*records, ("assessment", assessment)]:
+                records = [("capture", capture), ("session", session), ("passive_assessment", assessment)]
+                if event is not None:
+                    records.append(("event", event))
+                for kind, record in records:
                     conn.execute("INSERT INTO records VALUES (?, ?, ?, ?)",
                                  (kind, record.id, record.user_id, record.model_dump_json()))
-                conn.execute("INSERT INTO records VALUES ('receipt', ?, ?, ?)",
-                             (assessment.id, assessment.user_id, json.dumps({"fingerprint": fingerprint})))
+                conn.execute("INSERT INTO records VALUES ('passive_receipt', ?, ?, ?)",
+                             (capture.id, capture.user_id, json.dumps({"fingerprint": fingerprint})))
             except sqlite3.IntegrityError as exc:
                 raise ConflictError("A linked record ID already exists") from exc
+        return assessment.model_dump(mode="json")
+
+    def finish_capture(self, assessment, records):
+        # 같은 캡처의 동시 재전송이 중복 분석됐더라도 결과는 먼저 완료한 한 번만 저장합니다.
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT payload FROM records WHERE kind = 'passive_assessment' AND id = ?",
+                               (assessment.id,)).fetchone()
+            if row is None:
+                raise ReferenceError("Capture must be recorded before analysis")
+            previous = json.loads(row["payload"])
+            if previous["processing_state"] == "finished":
+                return previous
+            for kind, record in records:
+                conn.execute("INSERT INTO records VALUES (?, ?, ?, ?)",
+                             (kind, record.id, record.user_id, record.model_dump_json()))
+            conn.execute("UPDATE records SET payload = ? WHERE kind = 'passive_assessment' AND id = ?",
+                         (assessment.model_dump_json(), assessment.id))
         return assessment.model_dump(mode="json")
