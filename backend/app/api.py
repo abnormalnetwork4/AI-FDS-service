@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import services
 from .collection import ingest
-from .contracts import Assessment, FDSIngest, GatewayAudit
+from .contracts import Assessment, CaptureIngest, CaptureRecord
 from .repository import Repository
 from .schemas import AIUsageEvent, BehaviorWindow, DashboardSummary, DataRiskRequest, NetworkSession, RiskResult, WindowRequest
 
@@ -46,7 +46,7 @@ def list_events(repo: Repo, user_id: str | None = None, limit: Limit = 50, offse
 
 @router.post("/behavior-windows", response_model=BehaviorWindow, status_code=201, tags=["행동 집계"])
 def create_window(body: WindowRequest, repo: Repo):
-    # 원하는 구간을 직접 집계하는 API입니다. Gateway 자료를 받는 경로에서는 collection.py가 자동 집계합니다.
+    # 원하는 구간을 직접 집계하는 API입니다. 캡처 수집 경로에서는 collection.py가 자동 집계합니다.
     return services.build_window(repo, body)
 
 
@@ -89,27 +89,26 @@ def summary(repo: Repo, user_id: str | None = None):
     return services.dashboard(repo, user_id)
 
 
-@router.post("/ingest/gateway", response_model=Assessment, tags=["Gateway 연동"])
-def ingest_gateway(body: FDSIngest, request: Request, repo: Repo):
-    # Gateway의 HTTPFDSSink가 호출하는 주소입니다. 프롬프트는 body.text에 들어 있습니다.
-    # 수집부터 두 엔진 실행·저장까지의 구체적인 동작은 collection.py의 ingest()에 위임합니다.
+@router.post("/ingest/captures", response_model=Assessment, tags=["사후 분석 수집"])
+def ingest_capture(body: CaptureIngest, request: Request, repo: Repo):
+    # 미러링/캡처 수집기가 관측 자료의 복사본을 전송하는 API입니다. 원본 AI 요청 경로와 무관합니다.
     return ingest(repo, body, request.app.state.data_engine, request.app.state.network_engine)
 
 
-@router.get("/gateway-audits", response_model=list[GatewayAudit], tags=["Gateway 연동"])
-def list_gateway_audits(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
-    return repo.list("gateway_audit", user_id, limit, offset)
+@router.get("/captures", response_model=list[CaptureRecord], tags=["사후 분석 수집"])
+def list_captures(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
+    return repo.list("capture", user_id, limit, offset)
 
 
 @router.get("/assessments", response_model=list[Assessment], tags=["통합 분석 조회"])
 def list_assessments(repo: Repo, user_id: str | None = None, limit: Limit = 50, offset: Offset = 0):
-    return repo.list("assessment", user_id, limit, offset)
+    return repo.list("passive_assessment", user_id, limit, offset)
 
 
 @router.get("/assessments/{event_id}", response_model=Assessment, tags=["통합 분석 조회"])
 def get_assessment(event_id: str, repo: Repo):
-    # Gateway에서 받은 request_id를 event_id로 넣으면 같은 요청의 분석 묶음을 조회합니다.
-    result = repo.get("assessment", event_id)
+    # 수집기가 부여한 캡처 ID로 분석 묶음을 조회합니다.
+    result = repo.get("passive_assessment", event_id)
     if result is None:
         raise HTTPException(404, "Assessment not found")
     return result

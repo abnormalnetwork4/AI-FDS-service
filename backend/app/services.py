@@ -8,8 +8,7 @@ from .schemas import AIUsageEvent, BehaviorFeatures, BehaviorWindow, DashboardSu
 
 def build_window(repo: Repository, request: WindowRequest) -> BehaviorWindow:
     # 수동 집계 API용 함수: 기존 기록 읽기 → compute_window()로 계산 → 스냅샷 저장.
-    sessions = [NetworkSession.model_validate(row) for row in repo.list("session", request.user_id)]
-    events = [AIUsageEvent.model_validate(row) for row in repo.list("event", request.user_id)]
+    sessions, events = repo.observation_snapshot(request.user_id)
     return repo.save("window", compute_window(request, sessions, events))
 
 
@@ -31,7 +30,9 @@ def compute_window(request: WindowRequest, sessions: list[NetworkSession], event
             bytes_received=sum(s.bytes_received for s in sessions),
             distinct_destinations=len({s.destination for s in sessions}),
             blocked_connections=sum(s.connection_action == "block" for s in sessions),
-            direct_connections=sum(not s.via_gateway for s in sessions),
+            # 경로가 확인되지 않은 캡처를 우회 접속으로 추정하지 않습니다.
+            direct_connections=sum(s.via_gateway is False for s in sessions),
+            unknown_gateway_connections=sum(s.via_gateway is None for s in sessions),
             unapproved_ai_requests=sum(e.approved_destination is False for e in events),
             blocked_ai_requests=sum(e.policy_action == "block" for e in events),
             file_count=sum(e.file_count for e in events),

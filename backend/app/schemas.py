@@ -21,7 +21,7 @@ class Model(BaseModel):
 
 
 class NetworkSession(Model):
-    # 한 통신 세션의 사용자·목적지·시간·송수신량입니다. source로 수집기 기록과 Gateway 추정치를 구분합니다.
+    # 한 통신 세션의 사용자·목적지·시간·송수신량입니다. source는 관측 자료를 얻은 경로입니다.
     id: Identifier
     user_id: Identifier
     device_id: Identifier
@@ -32,9 +32,10 @@ class NetworkSession(Model):
     bytes_received: Count = 0
     packets_sent: Count = 0
     packets_received: Count = 0
-    via_gateway: bool
+    via_gateway: bool | None = None
     connection_action: Literal["allow", "block", "unknown"] = "unknown"
-    source: Literal["collector", "gateway_application"] = "collector"
+    # gateway_application은 기존 저장 데이터 조회를 위한 값이며 새 캡처 수집 API에서는 거절합니다.
+    source: Literal["collector", "packet_capture", "flow_export", "gateway_application"] = "collector"
 
     @model_validator(mode="after")
     def valid_interval(self):
@@ -77,6 +78,7 @@ class BehaviorFeatures(Model):
     distinct_destinations: Count
     blocked_connections: Count
     direct_connections: Count
+    unknown_gateway_connections: Count = 0
     unapproved_ai_requests: Count
     blocked_ai_requests: Count
     file_count: Count
@@ -96,6 +98,7 @@ class BehaviorWindow(Model):
 
 class DataRiskRequest(Model):
     # Data 엔진의 입력 계약입니다. text에는 원문, input_origin에는 그 원문의 출처가 들어갑니다.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
     user_id: Identifier
     text: str = Field(min_length=1, max_length=16384)
     input_origin: Literal["direct_user", "external_document", "tool_output"] = "direct_user"

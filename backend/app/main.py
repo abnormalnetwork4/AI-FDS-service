@@ -19,7 +19,7 @@ def create_app(
     network_engine: NetworkRiskEngine | None = None,
 ) -> FastAPI:
     # 앱 생성 시 저장소와 탐지 엔진을 선택합니다. 실제 모델 객체를 인자로 전달하면 기본 Stub을 교체합니다.
-    default_path = Path(__file__).resolve().parents[1] / "data" / "backend.sqlite3"
+    default_path = Path(__file__).resolve().parents[1] / "data" / "passive-fds.sqlite3"
     repo = Repository(database_path or Path(os.getenv("DATABASE_PATH", str(default_path))))
 
     @asynccontextmanager
@@ -29,8 +29,8 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="FDS 분석 서버", version="0.2.0", lifespan=lifespan,
-        description="Gateway와 분리된 수집·전처리·분석·조회 서버. 기본 엔진은 미연결 상태입니다.",
+        title="Out-of-Path FDS 분석 서버", version="0.3.0", lifespan=lifespan,
+        description="캡처 복사본의 수집·사후 분석·조회 전용. AI 요청 전달과 허용·차단을 수행하지 않습니다.",
     )
     app.state.repository = repo
     # app.state는 여러 API 함수가 공유하는 객체 보관 장소입니다.
@@ -53,7 +53,7 @@ def create_app(
     def health():
         with repo.connection() as conn:
             conn.execute("SELECT 1 FROM records LIMIT 1")
-        return {"status": "ok", "data_engine": type(app.state.data_engine).__name__,
+        return {"status": "ok", "mode": "out-of-path", "data_engine": type(app.state.data_engine).__name__,
                 "network_engine": type(app.state.network_engine).__name__}
 
     app.include_router(router)
