@@ -11,7 +11,7 @@ flowchart LR
     F --> D[Data Risk Engine: 원문 확보 시]
     N --> R[분석 결과 저장·조회 API]
     D --> R
-    R --> UI[탐지 대시보드: 후속 구현]
+    R --> UI[React 탐지 대시보드]
 ```
 
 수집기는 미러링된 트래픽이나 저장된 캡처를 읽어 API 계약에 맞는 JSON으로 전달하는 외부 구성 요소입니다. 이 저장소가 NIC에서 패킷을 캡처하거나 PCAP 파일을 직접 해석하지는 않습니다. 수집기를 원본 요청 경로와 분리해야 FDS 장애나 분석 지연이 원본 AI 통신을 멈추지 않습니다.
@@ -33,7 +33,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-**FDS 서버 하나만 실행합니다.** Gateway나 데모 AI 서버는 필요 없습니다.
+백엔드는 **FDS 서버 하나**를 실행합니다. 대시보드는 별도 터미널에서 `frontend`의 `npm ci`, `npm run dev`로 실행합니다. [프론트엔드 실행 안내](../frontend/README.md)를 참고하세요.
 
 - API 테스트 화면: http://127.0.0.1:8000/docs
 - 상태: http://127.0.0.1:8000/health
@@ -83,8 +83,10 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | POST | `/api/v1/network-risk/analyze/{window_id}` | 독립 행동 집계 분석 |
 | GET | `/api/v1/risks`, `/api/v1/risks/{risk_id}` | 엔진 결과 목록/상세 |
 | GET | `/api/v1/dashboard/summary` | 수집량·분석 건수·완료 점수 평균 |
+| GET | `/api/v1/dashboard/events` | 캡처별 화면 데이터와 전체 건수 |
+| GET | `/api/v1/dashboard/explanation?capture_id=...` | 저장된 분석 근거 요약 |
 
-목록은 `user_id`, `limit`(기본 50, 최대 200), `offset`을 지원합니다. 개별 세션/이벤트 등록은 저장만 수행합니다. 자동 분석은 캡처 수집 API에서 실행합니다. 대시보드 평균은 완료된 엔진 호출 점수의 단순 평균이며 통합 등급이 아닙니다. 현재 대시보드 화면은 없고 화면에서 사용할 조회 API까지 구현돼 있습니다.
+목록은 `user_id`, `limit`(기본 50, 최대 200), `offset`을 지원합니다. 개별 세션/이벤트 등록은 저장만 수행합니다. 자동 분석은 캡처 수집 API에서 실행합니다. 대시보드 평균은 완료된 엔진 호출 점수의 단순 평균이며 통합 등급이 아닙니다. React 화면은 `dashboard/events`로 최근 200건을 조회합니다. 개별 세션 등록만 한 기록은 캡처 분석 목록에 나타나지 않습니다.
 
 ## 수집·분석 처리 기준
 
@@ -102,7 +104,7 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 
 `app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)`를 구현해 `app/main.py`의 `create_app()`에 전달합니다. 학습 때의 전처리·특징 순서·점수 의미를 유지하고 원문을 결과 근거에 그대로 복사하지 않도록 구현합니다. 자세한 연결 위치는 한국어 코드 주석을 참고하세요.
 
-실제 ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한, 대시보드 화면은 후속 작업입니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
+실제 ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 대시보드 화면과 저장 결과 요약은 연결돼 있습니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
 
 ## 이전 Gateway 버전에서 변경된 점
 
