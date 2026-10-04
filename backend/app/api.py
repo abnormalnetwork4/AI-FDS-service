@@ -2,10 +2,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from . import services, dashboard
 from .collection import ingest
-from .contracts import Assessment, CaptureIngest, CaptureRecord
+from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest
+from .live import changes
 from .repository import Repository
 from .schemas import AIUsageEvent, BehaviorWindow, DashboardSummary, DataRiskRequest, NetworkSession, RiskResult, WindowRequest
 
@@ -103,6 +105,18 @@ def dashboard_explanation(repo: Repo, capture_id: str):
     if raw is None:
         raise HTTPException(404, "Assessment not found")
     return dashboard.explain(raw)
+
+
+@router.get("/dashboard/stream", tags=["대시보드"])
+async def dashboard_stream(request: Request, repo: Repo):
+    return StreamingResponse(changes(repo, request), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post("/ingest/events", response_model=Assessment, tags=["이벤트 분석 수집"])
+def ingest_event(body: EventIngest, request: Request, repo: Repo):
+    # 통신 종료 시각 없이 관측 발생 시각만 받습니다. 원본 AI 요청을 전달하는 API가 아닙니다.
+    return ingest(repo, body.as_capture(), request.app.state.data_engine, request.app.state.network_engine)
 
 
 @router.post("/ingest/captures", response_model=Assessment, tags=["사후 분석 수집"])

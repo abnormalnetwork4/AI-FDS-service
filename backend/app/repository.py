@@ -45,6 +45,15 @@ class Repository:
                 PRIMARY KEY (kind, id)
             )""")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_records_user ON records(kind, user_id)")
+            conn.execute("CREATE TABLE IF NOT EXISTS dashboard_revision (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
+            conn.execute("INSERT OR IGNORE INTO dashboard_revision VALUES (1, 0)")
+            for action in ("INSERT", "UPDATE"):
+                conn.execute(f"""CREATE TRIGGER IF NOT EXISTS dashboard_{action.lower()}
+                    AFTER {action} ON records WHEN NEW.kind = 'passive_assessment'
+                    BEGIN UPDATE dashboard_revision SET value = value + 1 WHERE id = 1; END""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS analysis_parts (
+                capture_id TEXT NOT NULL, slot TEXT NOT NULL, payload TEXT NOT NULL,
+                PRIMARY KEY(capture_id, slot))""")
             conn.commit()
 
     def save(self, kind, record):
@@ -125,6 +134,40 @@ class Repository:
         sessions = [NetworkSession.model_validate_json(row["payload"]) for row in rows if row["kind"] == "session"]
         events = [AIUsageEvent.model_validate_json(row["payload"]) for row in rows if row["kind"] == "event"]
         return sessions, events
+
+    def revision(self):
+        with self.connection() as conn:
+            return conn.execute("SELECT value FROM dashboard_revision WHERE id = 1").fetchone()[0]
+
+    def publish_result(self, capture_id, slot, result, window=None):
+        # 엔진별 완료 결과를 즉시 확정합니다. 재전송·동시 호출은 같은 슬롯을 중복 저장하지 않습니다.
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT payload FROM records WHERE kind = 'passive_assessment' AND id = ?",
+                               (capture_id,)).fetchone()
+            if row is None:
+                raise ReferenceError("Observation must be recorded before analysis")
+            assessment = json.loads(row["payload"])
+            if assessment["processing_state"] == "finished":
+                return assessment
+            exists = conn.execute("SELECT 1 FROM analysis_parts WHERE capture_id = ? AND slot = ?",
+                                  (capture_id, slot)).fetchone()
+            if not exists:
+                conn.execute("INSERT INTO analysis_parts VALUES (?, ?, ?)", (capture_id, slot, result.model_dump_json()))
+                records = [("risk", result)] + ([("window", window)] if window is not None else [])
+                for kind, record in records:
+                    conn.execute("INSERT INTO records VALUES (?, ?, ?, ?)",
+                                 (kind, record.id, record.user_id, record.model_dump_json()))
+                parts = conn.execute("SELECT payload FROM analysis_parts WHERE capture_id = ? ORDER BY slot",
+                                     (capture_id,)).fetchall()
+                results = [json.loads(part["payload"]) for part in parts]
+                complete = len(results) == 3
+                statuses = {r["status"] for r in results}
+                assessment.update(results=results, processing_state="finished" if complete else "processing",
+                    status="error" if "error" in statuses else "complete" if complete and statuses == {"complete"} else "pending")
+                conn.execute("UPDATE records SET payload = ? WHERE kind = 'passive_assessment' AND id = ?",
+                             (json.dumps(assessment, ensure_ascii=False), capture_id))
+        return assessment
 
     def record_capture(self, fingerprint, capture, assessment, session, event):
         # 관측 자료를 분석 전에 확정합니다. 느린 모델 때문에 다음 집계에서 앞선 통신이 빠지지 않게 합니다.

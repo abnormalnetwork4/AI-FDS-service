@@ -1,7 +1,8 @@
 """트래픽 경로 밖에서 수집한 관측 자료와 분석 결과의 계약."""
 from typing import Literal
-from pydantic import ConfigDict, Field, model_validator
-from .schemas import AIUsageEvent, Identifier, Model, NetworkSession, RiskResult
+import hashlib
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
+from .schemas import AIUsageEvent, Count, Identifier, Model, NetworkSession, RiskResult
 
 
 class PromptObservation(Model):
@@ -43,6 +44,43 @@ class CaptureRecord(Model):
     ai_event_id: Identifier | None
     source: str
     prompt_status: Literal["available", "unavailable", "too_large", "empty"]
+
+
+class EventIngest(Model):
+    """진행 중 통신에서 발생한 관측 한 건. 바이트는 누적값이 아닌 이번 관측의 증가량입니다."""
+    id: Identifier
+    session_id: Identifier
+    user_id: Identifier
+    device_id: Identifier
+    occurred_at: AwareDatetime
+    destination: str = Field(min_length=1, max_length=253)
+    bytes_sent: Count = 0
+    bytes_received: Count = 0
+    source: Literal["application_log", "collector", "packet_capture", "flow_export"] = "application_log"
+    provider: str | None = Field(default=None, min_length=1, max_length=100)
+    channel: Literal["web", "api"] = "api"
+    prompt: PromptObservation | None = None
+
+    @model_validator(mode="after")
+    def prompt_requires_application_event(self):
+        if self.prompt is not None and (self.source != "application_log" or self.provider is None):
+            raise ValueError("Prompt requires an application_log event with provider")
+        return self
+
+    def as_capture(self):
+        # 세션은 계속 유지될 수 있으므로 관측마다 고유 저장 ID를 부여합니다.
+        observation_id = "observation-" + hashlib.sha256(self.id.encode()).hexdigest()
+        session = NetworkSession(
+            id=observation_id, parent_session_id=self.session_id, observation_kind="event",
+            user_id=self.user_id, device_id=self.device_id, started_at=self.occurred_at,
+            ended_at=self.occurred_at, destination=self.destination, source=self.source,
+            bytes_sent=self.bytes_sent, bytes_received=self.bytes_received,
+        )
+        event = AIUsageEvent(id="usage-" + hashlib.sha256(self.id.encode()).hexdigest(),
+            session_id=observation_id, user_id=self.user_id, device_id=self.device_id,
+            occurred_at=self.occurred_at, provider=self.provider, channel=self.channel,
+            request_bytes=self.bytes_sent) if self.provider is not None else None
+        return CaptureIngest(id=self.id, session=session, ai_event=event, prompt=self.prompt)
 
 
 class Assessment(Model):

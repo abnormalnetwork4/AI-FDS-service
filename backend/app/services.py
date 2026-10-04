@@ -25,14 +25,14 @@ def compute_window(request: WindowRequest, sessions: list[NetworkSession], event
         start=start, end=end, duration_minutes=request.duration_minutes,
         features=BehaviorFeatures(
             # 모델 입력용 숫자들입니다. 위험 점수나 탐지 결과가 아니라 관찰한 행동의 통계입니다.
-            session_count=len(sessions), request_count=len(events),
+            session_count=len({s.parent_session_id or s.id for s in sessions}), request_count=len(events),
             bytes_sent=sum(s.bytes_sent for s in sessions),
             bytes_received=sum(s.bytes_received for s in sessions),
             distinct_destinations=len({s.destination for s in sessions}),
-            blocked_connections=sum(s.connection_action == "block" for s in sessions),
+            blocked_connections=len({s.parent_session_id or s.id for s in sessions if s.connection_action == "block"}),
             # 경로가 확인되지 않은 캡처를 우회 접속으로 추정하지 않습니다.
-            direct_connections=sum(s.via_gateway is False for s in sessions),
-            unknown_gateway_connections=sum(s.via_gateway is None for s in sessions),
+            direct_connections=len({s.parent_session_id or s.id for s in sessions if s.via_gateway is False}),
+            unknown_gateway_connections=len({s.parent_session_id or s.id for s in sessions if s.via_gateway is None}),
             unapproved_ai_requests=sum(e.approved_destination is False for e in events),
             blocked_ai_requests=sum(e.policy_action == "block" for e in events),
             file_count=sum(e.file_count for e in events),
@@ -47,7 +47,8 @@ def dashboard(repo: Repository, user_id: str | None) -> DashboardSummary:
     results = [RiskResult.model_validate(row) for row in repo.list("risk", user_id)]
     scores = [r.score for r in results if r.status == "complete" and r.score is not None]
     return DashboardSummary(
-        network_session_count=len(repo.list("session", user_id)),
+        network_session_count=len({(s["user_id"], s["device_id"], s.get("parent_session_id") or s["id"])
+                                   for s in repo.list("session", user_id)}),
         ai_event_count=len(repo.list("event", user_id)),
         behavior_window_count=len(repo.list("window", user_id)),
         analysis_count=len(results),
