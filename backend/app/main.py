@@ -29,7 +29,7 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="Out-of-Path FDS 분석 서버", version="0.3.0", lifespan=lifespan,
+        title="Out-of-Path FDS 분석 서버", version="0.4.0", lifespan=lifespan,
         description="캡처 복사본의 수집·사후 분석·조회 전용. AI 요청 전달과 허용·차단을 수행하지 않습니다.",
     )
     app.state.repository = repo

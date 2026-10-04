@@ -23,6 +23,8 @@ class Model(BaseModel):
 class NetworkSession(Model):
     # 한 통신 세션의 사용자·목적지·시간·송수신량입니다. source는 관측 자료를 얻은 경로입니다.
     id: Identifier
+    parent_session_id: Identifier | None = None
+    observation_kind: Literal["session", "event"] = "session"
     user_id: Identifier
     device_id: Identifier
     started_at: AwareDatetime
@@ -35,7 +37,7 @@ class NetworkSession(Model):
     via_gateway: bool | None = None
     connection_action: Literal["allow", "block", "unknown"] = "unknown"
     # gateway_application은 기존 저장 데이터 조회를 위한 값이며 새 캡처 수집 API에서는 거절합니다.
-    source: Literal["collector", "packet_capture", "flow_export", "gateway_application"] = "collector"
+    source: Literal["collector", "packet_capture", "flow_export", "gateway_application", "application_log"] = "collector"
 
     @model_validator(mode="after")
     def valid_interval(self):

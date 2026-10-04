@@ -27,6 +27,7 @@ class DashboardEvent(BaseModel):
     ended_at: str
     status: Literal["pending", "error"]
     processing_state: str
+    observation_kind: str
     reason: str
     score: None = None  # 통합 정책 미연결: 엔진 점수를 임의로 평균내지 않습니다.
     confidence: None = None
@@ -65,11 +66,11 @@ def present(raw, session_raw, windows):
                 window_minutes=duration,
             ))
     return DashboardEvent(
-        id=assessment.id, session_id=assessment.session_id, user=assessment.user_id,
+        id=assessment.id, session_id=session.parent_session_id or assessment.session_id, user=assessment.user_id,
         device_id=session.device_id, destination=session.destination,
         started_at=session.started_at.isoformat(), ended_at=session.ended_at.isoformat(),
         status="error" if assessment.status == "error" else "pending",
-        processing_state=assessment.processing_state, reason=assessment.reason,
+        processing_state=assessment.processing_state, observation_kind=session.observation_kind, reason=assessment.reason,
         network_reasons=groups["network"], prompt_reasons=groups["data"],
     )
 

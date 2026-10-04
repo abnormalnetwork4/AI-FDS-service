@@ -1,7 +1,7 @@
 """Out-of-path FDS: 관측 자료 저장 → 행동 집계 → 사후 분석. 원본 통신을 호출하거나 차단하지 않습니다."""
 import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 
 from .contracts import Assessment, CaptureIngest, CaptureRecord
@@ -49,7 +49,13 @@ def data_analysis(body, engine, availability):
 
 
 def ingest(repo: Repository, body: CaptureIngest, data_engine, network_engine):
-    fingerprint = hashlib.sha256(json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    payload = body.model_dump(mode="json")
+    # 기존 캡처의 재전송 지문은 새 선택 필드 추가 이후에도 동일하게 유지합니다.
+    if payload["session"]["parent_session_id"] is None:
+        payload["session"].pop("parent_session_id")
+    if payload["session"]["observation_kind"] == "session":
+        payload["session"].pop("observation_kind")
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     session = body.session
     availability = prompt_status(body)
     capture = CaptureRecord(id=body.id, user_id=session.user_id, device_id=session.device_id,
@@ -63,19 +69,19 @@ def ingest(repo: Repository, body: CaptureIngest, data_engine, network_engine):
         return existing
 
     sessions, events = repo.observation_snapshot(session.user_id)
-    # 완료된 세션을 관측한 시점을 기준으로 최근 5분/1시간을 봅니다. 세션은 시작 시각에 귀속합니다.
+    # 이벤트 발생 시점(기존 캡처는 종료 시점)에서 최근 5분/1시간을 즉시 집계합니다.
+    # 이벤트는 발생 시각, 기존 완료 세션은 시작 시각에 귀속하며 구간이 찰 때까지 기다리지 않습니다.
     end = session.ended_at + timedelta(microseconds=1)
     windows = [compute_window(WindowRequest(user_id=session.user_id, device_id=session.device_id,
                                             start=end - timedelta(minutes=minutes), duration_minutes=minutes),
                               sessions, events) for minutes in (5, 60)]
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        data_job = pool.submit(data_analysis, body, data_engine, availability)
-        network_job = pool.submit(lambda: [analyze_safely(network_engine, w, session.user_id, "network", body.id, w.id)
-                                          for w in windows])
-        results = [data_job.result(), *network_job.result()]
-    statuses = {result.status for result in results}
-    assessment = Assessment(id=body.id, user_id=session.user_id, session_id=session.id,
-                            processing_state="finished",
-                            status="error" if "error" in statuses else "pending" if "pending" in statuses else "complete",
-                            results=results)
-    return repo.finish_capture(assessment, [("window", w) for w in windows] + [("risk", r) for r in results])
+    # Data와 두 Network 구간을 각각 실행하고 먼저 끝난 결과부터 저장·화면에 공개합니다.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        jobs = {pool.submit(data_analysis, body, data_engine, availability): ("data", None)}
+        for window in windows:
+            job = pool.submit(analyze_safely, network_engine, window, session.user_id, "network", body.id, window.id)
+            jobs[job] = (f"network-{window.duration_minutes:02}", window)
+        for job in as_completed(jobs):
+            slot, window = jobs[job]
+            repo.publish_result(body.id, slot, job.result(), window)
+    return repo.get("passive_assessment", body.id)

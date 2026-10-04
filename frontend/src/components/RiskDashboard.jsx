@@ -1,4 +1,5 @@
 import { LEVELS, eventLevel, fetchEventPage } from "../lib/events.js";
+import { watchEvents } from "../lib/live.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldAlert,
@@ -165,6 +166,7 @@ async function explainEvent(event) {
 function useEvents({ live }) {
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
+  const [mode, setMode] = useState("polling");
   const [status, setStatus] = useState("loading"); // loading | ok | error
   const [error, setError] = useState(null);
   const [lastOkAt, setLastOkAt] = useState(null);
@@ -193,42 +195,33 @@ function useEvents({ live }) {
     return () => clearInterval(id);
   }, [live]);
 
-  // real: 폴링 + 실패 시 이전 데이터 유지
+  // real: 서버 변경 알림을 받으면 즉시 조회. 스트림 장애 시에만 5초 대체 조회.
   useEffect(() => {
     if (USE_MOCK) return undefined;
-    let ctrl = null;
-    let alive = true;
-    const load = async () => {
-      if (ctrl) return;
-      ctrl = new AbortController();
-      try {
-        const data = await fetchEventPage(API_BASE, ctrl.signal);
-        if (!alive) return;
+    const onData = (data) => {
         setEvents(data.events);
         setTotal(data.total);
         setStatus("ok");
         setError(null);
         setLastOkAt(new Date());
-      } catch (e) {
-        if (!alive || e.name === "AbortError") return;
+    };
+    const onError = (e) => {
         setStatus("error");
         setError(e.message || "요청 실패");
-      } finally {
-        ctrl = null;
-      }
     };
-    load();
-    const id = live ? setInterval(load, POLL_MS) : null;
-    return () => {
-      alive = false;
-      if (id) clearInterval(id);
-      if (ctrl) ctrl.abort();
-    };
+    if (live) return watchEvents({ base: API_BASE,
+      fetchPage: (signal) => fetchEventPage(API_BASE, signal), onData, onError, onMode: setMode });
+    const ctrl = new AbortController();
+    fetchEventPage(API_BASE, ctrl.signal).then((data) => {
+      if (!ctrl.signal.aborted) onData(data);
+    }).catch((error) => { if (!ctrl.signal.aborted) onError(error); });
+    return () => ctrl.abort();
   }, [live, reloadKey]);
 
   return {
     events,
     total,
+    mode,
     status,
     error,
     lastOkAt,
@@ -632,7 +625,7 @@ function SkeletonDetail() {
 
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
-  const { events, total, status, error, lastOkAt, isMock, advance, refresh } = useEvents({ live });
+  const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh } = useEvents({ live });
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -801,7 +794,7 @@ export default function RiskDashboard() {
       : status === "loading"
       ? "데이터를 불러오는 중…"
       : live
-      ? `5초마다 조회 · 마지막 갱신 ${fmtTime(lastOkAt)}`
+      ? `${isMock ? "데모 재생" : mode === "stream" ? "이벤트 수신 중" : "실시간 연결 재시도 · 5초 대체 조회"} · 마지막 갱신 ${fmtTime(lastOkAt)}`
       : "갱신 일시정지됨";
   const dotClass = status === "error" ? "live-dot--err" : live && status === "ok" ? "" : "live-dot--off";
 
@@ -1172,10 +1165,10 @@ export default function RiskDashboard() {
                 <Network size={14} /> 세션 ID <b>{selected.sessionId ?? selected.id}</b>
               </span>
               <span className="detail-meta__item">
-                <Clock size={14} /> 관측 {selected.connectedAt} · 구간 길이{" "}
-                <b>
-                  <LiveDuration startedAtMs={selected.startedAtMs} endedAtMs={selected.endedAtMs} />
-                </b>
+                <Clock size={14} /> 관측 {selected.connectedAt}
+                {selected.observation_kind === "event" ? " · 개별 이벤트" : <> · 구간 길이{" "}
+                  <b><LiveDuration startedAtMs={selected.startedAtMs} endedAtMs={selected.endedAtMs} /></b>
+                </>}
               </span>
             </div>
 
@@ -1192,6 +1185,7 @@ export default function RiskDashboard() {
             </div>
 
             <TopIssues event={selected} />
+            {selected.processing_state === "processing" && <div className="evidence-empty" role="status">분석 진행 중 · 완료된 엔진 결과부터 표시합니다.</div>}
 
             <div className="evidence-cols">
               <EvidenceGroup
