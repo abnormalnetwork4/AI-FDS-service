@@ -1,4 +1,4 @@
-import { LEVELS, eventLevel, fetchEventPage } from "../lib/events.js";
+import { LEVELS, MAX_PAGES, PAGE_SIZE, eventLevel, fetchEventPage, formatScore, shouldNotify } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -46,26 +46,26 @@ const INITIAL_TICK = 1;
 
 // 위협 카탈로그 — 코드/이름/상태별 설명. base 는 더미 기여도 계산용(추후 SHAP 값으로 교체).
 const NETWORK_ITEMS = [
-  { code: "N1", label: "비정상 대량 업로드", base: 24, details: { safe: "정상 범위 내", caution: "평균 대비 2.4배 업로드", danger: "8.4MB/s (평균 대비 6.0배)" } },
-  { code: "N2", label: "저속·분산 누적 전송", base: 14, details: { safe: "누적 전송 정상 범위", caution: "장시간 소량 전송 누적 (평균 대비 1.6배)", danger: "1시간 누적 전송 평균 대비 4.2배" } },
-  { code: "N3", label: "자동화·요청 폭주", base: 16, details: { safe: "정상 범위 내", caution: "5분간 요청 12회 (평균 대비 2.3배)", danger: "5분간 요청 41회 · 일정 간격 반복" } },
-  { code: "N4", label: "미승인 AI 목적지", base: 24, details: { safe: "미탐지", caution: "비표준 도메인 접근 이력 1건", danger: "화이트리스트 외 API 엔드포인트 접근 감지" } },
-  { code: "N5", label: "Gateway·Proxy 우회", base: 12, details: { safe: "정상 Gateway 경유", caution: "Proxy 설정 변경 이력", danger: "Gateway 우회 경로 사용 감지" } },
-  { code: "N6", label: "차단 후 우회·재시도", base: 10, details: { safe: "차단 이력 없음", caution: "동일 IP 반복 재접속 3회", danger: "차단 직후 15분 내 우회 재접속" } },
+  { code: "N1", label: "비정상 대량 업로드", base: 24, details: { normal: "정상 범위 내", caution: "평균 대비 2.4배 업로드", danger: "8.4MB/s (평균 대비 6.0배)" } },
+  { code: "N2", label: "저속·분산 누적 전송", base: 14, details: { normal: "누적 전송 정상 범위", caution: "장시간 소량 전송 누적 (평균 대비 1.6배)", danger: "1시간 누적 전송 평균 대비 4.2배" } },
+  { code: "N3", label: "자동화·요청 폭주", base: 16, details: { normal: "정상 범위 내", caution: "5분간 요청 12회 (평균 대비 2.3배)", danger: "5분간 요청 41회 · 일정 간격 반복" } },
+  { code: "N4", label: "미승인 AI 목적지", base: 24, details: { normal: "미탐지", caution: "비표준 도메인 접근 이력 1건", danger: "화이트리스트 외 API 엔드포인트 접근 감지" } },
+  { code: "N5", label: "Gateway·Proxy 우회", base: 12, details: { normal: "정상 Gateway 경유", caution: "Proxy 설정 변경 이력", danger: "Gateway 우회 경로 사용 감지" } },
+  { code: "N6", label: "차단 후 우회·재시도", base: 10, details: { normal: "차단 이력 없음", caution: "동일 IP 반복 재접속 3회", danger: "차단 직후 15분 내 우회 재접속" } },
 ];
 
 const PROMPT_ITEMS = [
-  { code: "AI_DISTILL", label: "인공지능 증류", base: 20, details: { safe: "미탐지", caution: "유사 질의 반복 패턴 일부 감지", danger: "유사 질의 대량 반복 (증류 의심)" } },
-  { code: "MISUSE", label: "업무 목적 외 오남용", base: 26, details: { safe: "미탐지", caution: "업무 외 주제 질의 일부 포함", danger: "업무 무관 대용량 문서 요약 요청 감지" } },
-  { code: "TOKEN_WASTE", label: "토큰 자원 낭비", base: 12, details: { safe: "정상 범위 내", caution: "토큰 사용량 평균 대비 2배", danger: "무의미 반복 입력으로 토큰 과다 소모" } },
-  { code: "PROMPT_INJECTION", label: "모델 교란", base: 42, details: { safe: "미탐지", caution: "특수 지시어 패턴 일부 포함", danger: "정책 우회 시도(지시 무시 요청) 감지" } },
+  { code: "AI_DISTILL", label: "인공지능 증류", base: 20, details: { normal: "미탐지", caution: "유사 질의 반복 패턴 일부 감지", danger: "유사 질의 대량 반복 (증류 의심)" } },
+  { code: "MISUSE", label: "업무 목적 외 오남용", base: 26, details: { normal: "미탐지", caution: "업무 외 주제 질의 일부 포함", danger: "업무 무관 대용량 문서 요약 요청 감지" } },
+  { code: "TOKEN_WASTE", label: "토큰 자원 낭비", base: 12, details: { normal: "정상 범위 내", caution: "토큰 사용량 평균 대비 2배", danger: "무의미 반복 입력으로 토큰 과다 소모" } },
+  { code: "PROMPT_INJECTION", label: "모델 교란", base: 42, details: { normal: "미탐지", caution: "특수 지시어 패턴 일부 포함", danger: "정책 우회 시도(지시 무시 요청) 감지" } },
 ];
 
-const INTENSITY = { safe: 0.15, caution: 0.6, danger: 1 };
+const INTENSITY = { normal: 0.15, caution: 0.5, warning: 0.75, danger: 1 };
 
 function buildItems(catalog, states = {}) {
   const raw = catalog.map((c) => {
-    const status = states[c.code] || "safe";
+    const status = states[c.code] || "normal";
     return { c, status, v: c.base * INTENSITY[status] };
   });
   const total = raw.reduce((a, r) => a + r.v, 0) || 1;
@@ -73,7 +73,7 @@ function buildItems(catalog, states = {}) {
     code: r.c.code,
     label: r.c.label,
     status: r.status,
-    detail: r.c.details[r.status],
+    detail: r.c.details[r.status] ?? r.c.details.caution, // 경고 문구는 주의 문구로 대체
     weight: Math.round((r.v / total) * 100),
   }));
 }
@@ -93,7 +93,7 @@ const SCENARIO = [
     id: "VPN-77042", user: "이O연 (마케팅)", dept: "마케팅기획팀", connectedAt: "14:02:51", durationMin: 38,
     frames: [
       { score: 46, confidence: 72, states: { N2: "caution", N6: "caution", MISUSE: "caution" } },
-      { score: 63, confidence: 68, states: { N2: "caution", N4: "caution", N6: "caution", MISUSE: "caution", PROMPT_INJECTION: "caution" } },
+      { score: 63, confidence: 68, states: { N2: "caution", N4: "warning", N6: "warning", MISUSE: "caution", PROMPT_INJECTION: "caution" } },
       { score: 76, confidence: 74, states: { N2: "caution", N4: "danger", N6: "danger", MISUSE: "caution", PROMPT_INJECTION: "caution" } },
     ],
   },
@@ -173,6 +173,8 @@ function useEvents({ live }) {
   const [lastOkAt, setLastOkAt] = useState(null);
   const [tick, setTick] = useState(INITIAL_TICK);
   const [reloadKey, setReloadKey] = useState(0);
+  const [pages, setPages] = useState(1); // 요청한 페이지 수 (200건 단위)
+  const [loadedPages, setLoadedPages] = useState(1); // 화면에 반영된 페이지 수
   const firstLoad = useRef(true);
 
   // mock: tick → 이벤트 생성 (최초 1회는 로딩 상태를 잠깐 보여줌)
@@ -202,6 +204,7 @@ function useEvents({ live }) {
     const onData = (data) => {
         setEvents(data.events);
         setTotal(data.total);
+        setLoadedPages(pages);
         setStatus("ok");
         setError(null);
         setLastOkAt(new Date());
@@ -211,13 +214,13 @@ function useEvents({ live }) {
         setError(e.message || "요청 실패");
     };
     if (live) return watchEvents({ base: API_BASE,
-      fetchPage: (signal) => fetchEventPage(API_BASE, signal), onData, onError, onMode: setMode });
+      fetchPage: (signal) => fetchEventPage(API_BASE, signal, fetch, pages), onData, onError, onMode: setMode });
     const ctrl = new AbortController();
-    fetchEventPage(API_BASE, ctrl.signal).then((data) => {
+    fetchEventPage(API_BASE, ctrl.signal, fetch, pages).then((data) => {
       if (!ctrl.signal.aborted) onData(data);
     }).catch((error) => { if (!ctrl.signal.aborted) onError(error); });
     return () => ctrl.abort();
-  }, [live, reloadKey]);
+  }, [live, reloadKey, pages]);
 
   return {
     events,
@@ -229,6 +232,10 @@ function useEvents({ live }) {
     isMock: USE_MOCK,
     advance: () => setTick((t) => t + 1),
     refresh: () => setReloadKey((k) => k + 1),
+    hasMore: !USE_MOCK && events.length < total && pages < MAX_PAGES,
+    capped: !USE_MOCK && events.length < total && pages >= MAX_PAGES,
+    loadingMore: pages !== loadedPages && status !== "error",
+    loadMore: () => setPages((p) => Math.min(p + 1, MAX_PAGES)),
   };
 }
 
@@ -258,12 +265,17 @@ function sortItems(items) {
 
 function topContributors(event, n = 3) {
   return sortItems([...event.network_reasons, ...event.prompt_reasons])
-    .filter((i) => ["danger", "caution"].includes(i.status))
+    .filter((i) => ["danger", "warning", "caution"].includes(i.status))
     .slice(0, n);
 }
 
 function buildFallbackSummary(e) {
-  if (e.isReal) return `${e.user}: ${e.reason} 저장된 화면 데이터 기준이며 최신 서버 요약 조회에 실패했습니다.`;
+  if (e.isReal) {
+    const grade = eventLevel(e);
+    const head = ["pending", "error"].includes(grade) ? e.reason
+      : `통합 등급 ${LEVELS[grade].label}${e.score != null ? `(${formatScore(e.score)}점)` : ""}.${e.override ? ` 강제 위험 규칙 적용: ${e.overrideReasons.join(", ") || "사유 미제공"}.` : ""}`;
+    return `${e.user}: ${head} 저장된 화면 데이터 기준이며 최신 서버 요약 조회에 실패했습니다.`;
+  }
   const level = LEVELS[eventLevel(e)].label;
   const top = topContributors(e, 3);
   if (!top.length) {
@@ -272,18 +284,6 @@ function buildFallbackSummary(e) {
   const parts = top.map((t) => `${t.label}(${t.detail})`).join(", ");
   const tail = e.confidence < 60 ? "로 낮은 편이라 담당자의 직접 확인이 필요합니다" : "입니다";
   return `${e.user} 세션은 ${parts} 등이 주된 원인이 되어 ${e.score}점(${level})으로 산정되었습니다. 예측 신뢰도는 ${e.confidence}%${tail}.`;
-}
-
-// 등급 전환 알림 — 경계선 근처에서 깜빡일 때 토스트가 반복되지 않도록 ±2점 여유를 둔다.
-function shouldNotify(oldLevel, newLevel, score) {
-  if (oldLevel === newLevel || score == null || [oldLevel, newLevel].some((v) => ["pending", "error"].includes(v))) return false;
-  const up = LEVELS[newLevel].rank > LEVELS[oldLevel].rank;
-  if (up) {
-    const boundary = newLevel === "danger" ? 70 : 40;
-    return score >= boundary + 2;
-  }
-  const boundary = oldLevel === "danger" ? 70 : 40;
-  return score <= boundary - 2;
 }
 
 // CSV — 따옴표/쉼표 이스케이프 + 엑셀 수식 인젝션 방어
@@ -297,10 +297,9 @@ function csvCell(v) {
 /* ───────────────────────── 3) UI 컴포넌트 ───────────────────────── */
 
 function StatusIcon({ status, size = 15 }) {
-  if (status === "danger") return <ShieldAlert size={size} color={LEVELS.danger.color} />;
-  if (status === "caution") return <ShieldQuestion size={size} color={LEVELS.caution.color} />;
-  if (status !== "safe") return <ShieldQuestion size={size} color={LEVELS[status].color} />;
-  return <ShieldCheck size={size} color={LEVELS.safe.color} />;
+  if (status === "danger" || status === "warning") return <ShieldAlert size={size} color={LEVELS[status].color} />;
+  if (status !== "normal") return <ShieldQuestion size={size} color={LEVELS[status].color} />;
+  return <ShieldCheck size={size} color={LEVELS.normal.color} />;
 }
 
 function EvidenceItem({ item }) {
@@ -335,8 +334,8 @@ function EvidenceItem({ item }) {
 
 function EvidenceGroup({ title, icon, items, accent, expanded, onToggle }) {
   const sorted = sortItems(items);
-  const risky = sorted.filter((i) => i.status !== "safe");
-  const safe = sorted.filter((i) => i.status === "safe");
+  const risky = sorted.filter((i) => i.status !== "normal");
+  const normal = sorted.filter((i) => i.status === "normal");
   const visible = expanded ? sorted : risky;
 
   return (
@@ -354,10 +353,10 @@ function EvidenceGroup({ title, icon, items, accent, expanded, onToggle }) {
           <EvidenceItem key={item.id ?? item.code} item={item} />
         ))}
       </ul>
-      {safe.length > 0 && (
+      {normal.length > 0 && (
         <button className="collapse-btn" onClick={onToggle}>
           <ChevronDown size={13} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
-          {expanded ? "양호 항목 접기" : `양호 ${safe.length}개 항목 보기`}
+          {expanded ? "정상 항목 접기" : `정상 ${normal.length}개 항목 보기`}
         </button>
       )}
     </div>
@@ -392,6 +391,7 @@ function RiskScoreBadge({ score, level }) {
   const { color, label } = LEVELS[level];
   const circumference = 2 * Math.PI * 54;
   const offset = circumference - ((score ?? 0) / 100) * circumference;
+  const unit = score != null ? "/ 100" : level === "pending" ? "미판정 · 안전 판정 아님" : "점수 미제공";
 
   return (
     <div className="score-badge">
@@ -412,8 +412,8 @@ function RiskScoreBadge({ score, level }) {
         />
       </svg>
       <div className="score-badge__center">
-        <span className="score-badge__num" style={{ color, transition: "color 0.6s ease" }}>{score ?? "—"}</span>
-        <span className="score-badge__unit">{score == null ? "통합 등급 미연결" : "/ 100"}</span>
+        <span className="score-badge__num" style={{ color, transition: "color 0.6s ease" }}>{formatScore(score)}</span>
+        <span className="score-badge__unit">{unit}</span>
       </div>
       <span className="score-badge__label" style={{ color, borderColor: color }}>{label}</span>
     </div>
@@ -469,7 +469,7 @@ function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
           {session.sessionId ?? session.id} · {session.connectedAt}
         </span>
       </div>
-      <span className="session-row__score" style={{ color, transition: "color 0.6s ease" }}>{session.score ?? LEVELS[level].label}</span>
+      <span className="session-row__score" style={{ color, transition: "color 0.6s ease" }}>{session.score != null ? formatScore(session.score) : LEVELS[level].label}</span>
       <ChevronRight size={16} color="#B7BAC3" />
     </button>
   );
@@ -494,7 +494,7 @@ function HoverTooltip({ session, pos }) {
   return (
     <div className="hover-tooltip" style={{ left, top, width: TOOLTIP_W }}>
       <div className="hover-tooltip__head">
-        <span style={{ color: LEVELS[level].color }}>{session.score == null ? "점수 미제공" : `${session.score}점`}</span>
+        <span style={{ color: LEVELS[level].color }}>{session.score == null ? "점수 미제공" : `${formatScore(session.score)}점`}</span>
         <span className="hover-tooltip__badge" style={{ color: LEVELS[level].color, borderColor: LEVELS[level].color }}>
           {LEVELS[level].label}
         </span>
@@ -517,8 +517,9 @@ function HoverTooltip({ session, pos }) {
 function LevelBar({ counts, total }) {
   const segs = [
     { key: "danger", value: counts.danger },
+    { key: "warning", value: counts.warning },
     { key: "caution", value: counts.caution },
-    { key: "safe", value: counts.safe },
+    { key: "normal", value: counts.normal },
     { key: "pending", value: counts.pending },
     { key: "error", value: counts.error },
   ];
@@ -629,7 +630,7 @@ function SkeletonDetail() {
 
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
-  const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh } = useEvents({ live });
+  const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh, hasMore, capped, loadingMore, loadMore } = useEvents({ live });
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -685,7 +686,7 @@ export default function RiskDashboard() {
         notifiedRef.current[e.id] = lv;
         return;
       }
-      if (shouldNotify(old, lv, e.score)) {
+      if (shouldNotify(old, lv, e.score, e.isReal)) {
         toastIdRef.current += 1;
         newToasts.push({
           id: toastIdRef.current,
@@ -728,7 +729,7 @@ export default function RiskDashboard() {
   const selected = filtered.find((e) => e.id === selectedId) || filtered[0] || null;
 
   const counts = useMemo(() => {
-    const c = { danger: 0, caution: 0, safe: 0, pending: 0, error: 0 };
+    const c = { danger: 0, warning: 0, caution: 0, normal: 0, pending: 0, error: 0 };
     events.forEach((s) => c[eventLevel(s)]++);
     return c;
   }, [events]);
@@ -745,14 +746,15 @@ export default function RiskDashboard() {
   }
 
   function exportCsv() {
-    const header = ["캡처ID", "세션ID", "사용자", "단말", "점수", "등급", "예측신뢰도", "관측시간"];
+    const header = ["캡처ID", "세션ID", "사용자", "단말", "점수", "등급", "강제위험", "예측신뢰도", "관측시간"];
     const rows = filtered.map((s) => [
       s.id,
       s.sessionId ?? s.id,
       s.user,
       s.dept,
-      s.score,
+      s.score == null ? "" : formatScore(s.score),
       LEVELS[eventLevel(s)].label,
+      s.override ? "Y" : "",
       s.confidence == null ? "" : `${s.confidence}%`,
       s.connectedAt,
     ]);
@@ -943,6 +945,8 @@ export default function RiskDashboard() {
         .confidence-card__num span { font-size: 14px; font-weight: 500; }
         .confidence-bar { width: 100%; height: 6px; background: #E3E5EC; border-radius: 4px; overflow: hidden; margin: 10px 0 8px; }
         .confidence-bar__fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
+        .override-note { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; padding: 9px 12px; border: 1px solid #C6362A; border-radius: 8px; background: #FDF2F1; color: #8F2A21; font-size: 12.5px; line-height: 1.5; }
+        .override-note svg { flex-shrink: 0; margin-top: 2px; }
         .confidence-card__tier { font-size: 12px; font-weight: 500; line-height: 1.45; }
 
         .top-issues { margin-top: 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; background: var(--accent-soft); border-radius: 10px; }
@@ -970,6 +974,9 @@ export default function RiskDashboard() {
         .weight-bar { position: relative; margin-top: 7px; height: 4px; background: #E9EAF0; border-radius: 4px; }
         .weight-bar__fill { height: 100%; border-radius: 4px; opacity: .9; transition: width .4s ease; }
         .weight-bar__label { position: absolute; right: 0; top: 7px; font-size: 11px; color: var(--text-dim); }
+        .list-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 6px; font-size: 12px; color: var(--text-dim); text-align: center; }
+        .list-more button { background: var(--tint); border: 1px solid var(--line, #E3E5EC); border-radius: 8px; color: var(--accent); font-size: 12.5px; padding: 7px 14px; cursor: pointer; }
+        .list-more button:disabled { opacity: .6; cursor: default; }
         .collapse-btn { display: flex; align-items: center; gap: 5px; margin-top: 22px; background: transparent; border: none; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 4px 0; }
 
         .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
@@ -1041,8 +1048,9 @@ export default function RiskDashboard() {
           <div className="header-stats">
             <div className="header-stats__row">
               <span style={{ color: LEVELS.danger.color }}>위험 {counts.danger}</span>
+              <span style={{ color: LEVELS.warning.color }}>경고 {counts.warning}</span>
               <span style={{ color: LEVELS.caution.color }}>주의 {counts.caution}</span>
-              <span style={{ color: LEVELS.safe.color }}>양호 {counts.safe}</span>
+              <span style={{ color: LEVELS.normal.color }}>정상 {counts.normal}</span>
               <span style={{ color: LEVELS.pending.color }}>미판정 {counts.pending}</span>
               <span style={{ color: LEVELS.error.color }}>오류 {counts.error}</span>
             </div>
@@ -1086,8 +1094,9 @@ export default function RiskDashboard() {
               {[
                 { key: "all", label: "전체" },
                 { key: "danger", label: "위험" },
+                { key: "warning", label: "경고" },
                 { key: "caution", label: "주의" },
-                { key: "safe", label: "양호" },
+                { key: "normal", label: "정상" },
                 { key: "pending", label: "미판정" },
                 { key: "error", label: "오류" },
               ].map((f) => (
@@ -1136,6 +1145,17 @@ export default function RiskDashboard() {
                   onLeave={handleLeave}
                 />
               ))}
+              {(hasMore || capped) && (
+                <div className="list-more">
+                  {query.trim() && <span>검색·필터는 불러온 {events.length}건 안에서만 적용됩니다.</span>}
+                  {hasMore && (
+                    <button onClick={loadMore} disabled={loadingMore}>
+                      {loadingMore ? "불러오는 중…" : `더 보기 (${events.length} / ${total}건)`}
+                    </button>
+                  )}
+                  {capped && <span>최대 {MAX_PAGES * PAGE_SIZE}건까지 조회합니다. 이전 기록은 CSV·API로 확인해 주세요.</span>}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1191,6 +1211,15 @@ export default function RiskDashboard() {
             </div>
 
             <TopIssues event={selected} />
+            {selected.override && (
+              <div className="override-note" role="note">
+                <ShieldAlert size={14} color={LEVELS.danger.color} />
+                <span>
+                  <b>강제 위험 규칙 적용</b> · 합계 점수와 관계없이 위험으로 판정됨
+                  {selected.overrideReasons.length > 0 && <> ({selected.overrideReasons.join(" / ")})</>}
+                </span>
+              </div>
+            )}
             {selected.processing_state === "processing" && <div className="evidence-empty" role="status">분석 진행 중 · 완료된 엔진 결과부터 표시합니다.</div>}
 
             <div className="evidence-cols">
