@@ -320,6 +320,9 @@ function EvidenceItem({ item }) {
           </span>
         </div>
         <span className="evidence-item__detail">{item.detail}</span>
+        {item.probability != null && <span className="evidence-item__detail">
+          모델 예측 확률 {(item.probability * 100).toFixed(1)}% · 판정 기준 {(item.threshold * 100).toFixed(1)}% 초과 (위험도 점수 아님)
+        </span>}
         {item.weight != null ? <div className="weight-bar">
           <div className="weight-bar__fill" style={{ width: `${item.weight}%`, background: LEVELS[item.status].color }} />
           <span className="weight-bar__label">기여도 {item.weight}%</span>

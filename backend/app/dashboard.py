@@ -14,6 +14,9 @@ class Evidence(BaseModel):
     detail: str
     status: Literal["pending", "complete", "error"]
     score: float | None
+    detected: bool | None = None
+    probability: float | None = None
+    threshold: float | None = None
     window_minutes: int | None = None
 
 
@@ -63,7 +66,8 @@ def present(raw, session_raw, windows):
                 id=f"{result.id}:{index}", code=finding.code,
                 label=finding.name + (f" · {duration}분 집계" if duration else ""),
                 detail=finding.reason, status=finding.status, score=finding.score,
-                window_minutes=duration,
+                window_minutes=duration, detected=finding.detected,
+                probability=finding.probability, threshold=finding.threshold,
             ))
     return DashboardEvent(
         id=assessment.id, session_id=session.parent_session_id or assessment.session_id, user=assessment.user_id,
@@ -83,6 +87,11 @@ def explain(raw):
     for result in assessment.results:
         score = f", 엔진 점수 {result.score:g}/100" if result.score is not None else ""
         lines.append(f"{result.engine} ({result.engine_version}): {labels[result.status]}{score}.")
-        lines.extend(f"{f.name}: {f.reason}" for f in result.findings)
+        for finding in result.findings:
+            classification = ""
+            if finding.detected is not None:
+                classification = (f"{'탐지' if finding.detected else '미탐지'}, "
+                                  f"모델 예측 확률 {finding.probability:.1%} (위험도 점수 아님). ")
+            lines.append(f"{finding.name}: {classification}{finding.reason}")
     lines.append("저장된 결과의 요약이며 외부 AI 호출이나 자동 차단은 수행하지 않습니다.")
     return Explanation(text="\n".join(lines))

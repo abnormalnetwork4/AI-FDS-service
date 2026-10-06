@@ -6,6 +6,8 @@ export const LEVELS = {
   pending: { label: '미판정', color: '#737987', rank: -1 },
   error: { label: '분석 오류', color: '#AD6300', rank: 3 },
   complete: { label: '분석 완료', color: '#33429A', rank: 0 },
+  detected: { label: '탐지', color: '#AD6300', rank: 1 },
+  not_detected: { label: '미탐지', color: '#33429A', rank: 0 },
 };
 
 export function nullableScore(value) {
@@ -25,12 +27,23 @@ export function eventLevel(event) {
 const dateMs = (value) => value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null;
 export function normalizeEvent(raw) {
   const startedAtMs = dateMs(raw.started_at);
-  const item = (x) => ({
+  const item = (x) => {
+    const classified = x.status === 'complete' && typeof x.detected === 'boolean'
+      && typeof x.probability === 'number' && Number.isFinite(x.probability)
+      && x.probability >= 0 && x.probability <= 1
+      && typeof x.threshold === 'number' && x.threshold > 0 && x.threshold < 1
+      && x.detected === (x.probability > x.threshold);
+    return {
     ...x, label: x.label ?? x.code, detail: x.detail ?? '',
-    status: ['pending', 'complete', 'error'].includes(x.status) ? x.status : 'pending',
+    status: classified ? (x.detected ? 'detected' : 'not_detected')
+      : ['pending', 'complete', 'error'].includes(x.status) ? x.status : 'pending',
+    detected: classified ? x.detected : null,
+    probability: classified ? x.probability : null,
+    threshold: classified ? x.threshold : null,
     score: x.status === 'complete' ? nullableScore(x.score) : null,
     weight: null,
-  });
+    };
+  };
   return {
     ...raw, isReal: true, id: String(raw.id), sessionId: raw.session_id,
     user: raw.user ?? '-', dept: raw.device_id ?? '-',

@@ -1,0 +1,174 @@
+{
+  "format_version": 1,
+  "model_version": "all-in-one-5c510f4828e433e4",
+  "source_notebook_sha256": "8e3132aabc176ba13f3d386e6ac9975565b6ab481a25ec0d69c5ec301d94cd58",
+  "created_at": "2026-10-06T06:24:28.961912+00:00",
+  "labels": [
+    "AI_steal",
+    "prompt_injection",
+    "abuse_act",
+    "token_waste_repeat"
+  ],
+  "thresholds": {
+    "AI_steal": 0.5,
+    "prompt_injection": 0.5,
+    "abuse_act": 0.5,
+    "token_waste_repeat": 0.5
+  },
+  "files": {
+    "vectorizer.joblib": "c3c1972afb7116d756f8e099a46d60465e8de011a371dfdb4730ba9ef52bffbb",
+    "AI_steal.ubj": "4d52e046a4dec58c78d90f96c2959a77789216b18391ce48f267e687c23c7ace",
+    "prompt_injection.ubj": "fddc31666aa52333d15ba393c689b03ce2e2a6e144c6b3e217f21e87c939383c",
+    "abuse_act.ubj": "f564a65b7232a23f0d3c2a928020277441cbf6904c3353d45e1abd57ab9c7835",
+    "token_waste_repeat.ubj": "15064d06e6a6007a8a39d904116f7ca2e75f924978d8429c0a9d9779dad45f94"
+  },
+  "training": {
+    "source_rows": 621923,
+    "training_rows": 546973,
+    "excluded_all_unknown_rows": 74950,
+    "per_label": {
+      "AI_steal": {
+        "training_rows": 164604,
+        "negative": 84154,
+        "positive": 80450,
+        "unknown_rows": 457319
+      },
+      "prompt_injection": {
+        "training_rows": 175084,
+        "negative": 92649,
+        "positive": 82435,
+        "unknown_rows": 446839
+      },
+      "abuse_act": {
+        "training_rows": 164857,
+        "negative": 88006,
+        "positive": 76851,
+        "unknown_rows": 457066
+      },
+      "token_waste_repeat": {
+        "training_rows": 90158,
+        "negative": 50408,
+        "positive": 39750,
+        "unknown_rows": 531765
+      }
+    },
+    "features": 91419,
+    "seconds": 129.74112100014463,
+    "source_counts": {
+      "local_synthetic_ko_expansion_50k": 37718,
+      "authored_synthetic_ko_20261003": 179500,
+      "samsung_ko_100000_v1": 120000,
+      "local_synthetic_ko": 12008,
+      "samsung_assumed_ko_60000_v1": 60597,
+      "local_independent_synthetic_ko_replacement_20261005": 274,
+      "HaniMeni/KoPI-Bench": 9376,
+      "authored_synthetic_ko_20261004_10k": 10000,
+      "legacy_source_not_recorded": 60000,
+      "authored_synthetic_legacy": 45500,
+      "authored_multilabel_ko_augmentation_20261005_v1": 6000,
+      "authored_multilabel_ko_purpose_contrast_20261005_r1": 6000
+    },
+    "versions": {
+      "sklearn": "1.7.2",
+      "xgboost": "3.4.1"
+    },
+    "model_hyperparameters": {},
+    "vectorizer_hyperparameters": {}
+  },
+  "data": {
+    "raw_training_rows": 621983,
+    "original_training_rows": 609983,
+    "training_rows_after_review": 621923,
+    "augmentation": {
+      "review_rows": 5389,
+      "review_applied_rows": 3910,
+      "review_excluded_rows": 60,
+      "review_deferred_legacy_retained_rows": 1419,
+      "review_status_counts": {
+        "ai_reviewed_provisional": 331,
+        "excluded_medical_scope": 5,
+        "excluded_missing_injection_context": 5,
+        "excluded_unresolved_token": 50,
+        "rule_screened_provisional": 3572,
+        "excluded_external_source_requires_individual_semantic_review": 57,
+        "ai_read_provisional": 7,
+        "excluded_own_label_not_supported_by_conservative_rules": 1108,
+        "excluded_missing_explicit_work_evidence": 254
+      },
+      "synthetic_added_rows": 12000,
+      "review_batches": {
+        "multilabel_review_400.csv": {
+          "review_rows": 391,
+          "review_applied_rows": 331,
+          "review_excluded_rows": 60,
+          "review_deferred_legacy_retained_rows": 0,
+          "review_status_counts": {
+            "ai_reviewed_provisional": 331,
+            "excluded_medical_scope": 5,
+            "excluded_missing_injection_context": 5,
+            "excluded_unresolved_token": 50
+          }
+        },
+        "multilabel_review_5000_r1.csv": {
+          "review_rows": 4998,
+          "review_applied_rows": 3579,
+          "review_excluded_rows": 0,
+          "review_deferred_legacy_retained_rows": 1419,
+          "review_status_counts": {
+            "rule_screened_provisional": 3572,
+            "excluded_external_source_requires_individual_semantic_review": 57,
+            "ai_read_provisional": 7,
+            "excluded_own_label_not_supported_by_conservative_rules": 1108,
+            "excluded_missing_explicit_work_evidence": 254
+          }
+        }
+      },
+      "synthetic_batches": {
+        "multilabel_synthetic_6000_candidates.csv": 6000,
+        "multilabel_contrast_6000_r1.csv": 6000
+      }
+    },
+    "quality_review": {},
+    "ai_provisional_use_authorized": true,
+    "usable_training_candidates": 546973,
+    "excluded_all_unannotated_rows": 74950,
+    "prepared_test_input_rows": 1000,
+    "test_mode": "integrated",
+    "test_role": "new_authored_synthetic_holdout_v5_after_quality_remediation",
+    "fully_annotated_training_rows": 15910,
+    "per_label": {
+      "AI_steal": {
+        "negative": 84154,
+        "positive": 80450,
+        "usable_rows": 164604,
+        "unannotated_rows": 457319
+      },
+      "prompt_injection": {
+        "negative": 92649,
+        "positive": 82435,
+        "usable_rows": 175084,
+        "unannotated_rows": 446839
+      },
+      "abuse_act": {
+        "negative": 88006,
+        "positive": 76851,
+        "usable_rows": 164857,
+        "unannotated_rows": 457066
+      },
+      "token_waste_repeat": {
+        "negative": 50408,
+        "positive": 39750,
+        "usable_rows": 90158,
+        "unannotated_rows": 531765
+      }
+    },
+    "unmapped_legacy_label_counts": {
+      "ambiguous": 37475,
+      "bounded_mass_repeat": 37475
+    },
+    "test_rows_with_group_information": 0,
+    "group_independence_verified": false,
+    "checks": "빈값·구조·중복·상충 정답·정규화 동일 문장 겹침 검사 통과"
+  },
+  "limitations": "AI·규칙 잠정 라벨 기반 시범 모델. 실제 업무 성능·위험 점수·판단 근거는 미검증."
+}

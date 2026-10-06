@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api import router
-from .engines import DataRiskEngine, NetworkRiskEngine, StubDataRiskEngine, StubNetworkRiskEngine
+from .engines import DataRiskEngine, NetworkRiskEngine, StubNetworkRiskEngine
+from .prompt_engine import configured_data_engine
 from .repository import ConflictError, ReferenceError, Repository
 
 
@@ -27,7 +28,7 @@ def create_app(
     data_engine: DataRiskEngine | None = None,
     network_engine: NetworkRiskEngine | None = None,
 ) -> FastAPI:
-    # 앱 생성 시 저장소와 탐지 엔진을 선택합니다. 실제 모델 객체를 인자로 전달하면 기본 Stub을 교체합니다.
+    # 기본은 All_in_one 프롬프트 모델입니다. 다른 엔진을 주입하거나 PROMPT_ENGINE=stub으로 시험할 수 있습니다.
     default_path = Path(__file__).resolve().parents[1] / "data" / "passive-fds.sqlite3"
     repo = Repository(database_path or Path(os.getenv("DATABASE_PATH", str(default_path))))
 
@@ -35,16 +36,18 @@ def create_app(
     async def lifespan(app: FastAPI):
         # 서버 시작 때 한 번 실행됩니다. yield 이후 구간에는 향후 모델·연결 정리 코드를 둘 수 있습니다.
         repo.initialize()
+        app.state.data_engine = data_engine if data_engine is not None else configured_data_engine()
         yield
 
     app = FastAPI(
-        title="Out-of-Path FDS 분석 서버", version="0.4.0", lifespan=lifespan,
+        title="Out-of-Path FDS 분석 서버", version="0.5.0", lifespan=lifespan,
         description="캡처 복사본의 수집·사후 분석·조회 전용. AI 요청 전달과 허용·차단을 수행하지 않습니다.",
     )
     app.state.repository = repo
     # app.state는 여러 API 함수가 공유하는 객체 보관 장소입니다.
-    # 실제 어댑터는 모델을 미리 로딩해 재사용하도록 구현합니다. 아래 Stub은 학습 모델을 불러오지 않습니다.
-    app.state.data_engine = data_engine if data_engine is not None else StubDataRiskEngine()
+    # 프롬프트 모델은 lifespan에서 한 번 로딩해 재사용합니다. 요청마다 학습하지 않습니다.
+    app.state.data_engine = data_engine
+    # 네트워크 엔진은 model/network의 XGBoost 모델을 미리 로딩해 재사용합니다.
     app.state.network_engine = network_engine if network_engine is not None else default_network_engine()
     origins = [v.strip() for v in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",") if v.strip()]
     # CORS는 브라우저가 다른 주소의 API를 호출할 때 적용하는 규칙입니다. 로그인·권한 검사 기능은 아닙니다.
@@ -63,7 +66,8 @@ def create_app(
         with repo.connection() as conn:
             conn.execute("SELECT 1 FROM records LIMIT 1")
         return {"status": "ok", "mode": "out-of-path", "data_engine": type(app.state.data_engine).__name__,
-                "network_engine": type(app.state.network_engine).__name__}
+                "network_engine": type(app.state.network_engine).__name__,
+                "prompt_model_version": getattr(app.state.data_engine, "model_version", None)}
 
     app.include_router(router)
     return app
