@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from .contracts import Assessment, CaptureIngest, CaptureRecord
 from .repository import Repository
-from .schemas import DataRiskRequest, Finding, RiskResult, WindowRequest
+from .schemas import OPTIONAL_EVENT_FIELDS, DataRiskRequest, Finding, RiskResult, WindowRequest
 from .services import compute_window
 
 
@@ -55,6 +55,10 @@ def ingest(repo: Repository, body: CaptureIngest, data_engine, network_engine):
         payload["session"].pop("parent_session_id")
     if payload["session"]["observation_kind"] == "session":
         payload["session"].pop("observation_kind")
+    if payload["ai_event"] is not None:
+        for field in OPTIONAL_EVENT_FIELDS:
+            if payload["ai_event"][field] is None:
+                payload["ai_event"].pop(field)
     fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     session = body.session
     availability = prompt_status(body)

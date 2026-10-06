@@ -1,0 +1,361 @@
+[
+ {
+  "window_id": "mix_run_07_mix_te2_user_027_w18",
+  "window_start": "2026-11-07T20:30:00.000000+09:00",
+  "network_score": 70.0,
+  "network_grade": "위험",
+  "integrated_contribution": 28.0,
+  "threat": "N1",
+  "threat_name": "비정상 대량 업로드",
+  "score_breakdown": {
+   "base_score": 50.0,
+   "probability_score": 20.0,
+   "retry_score": 0.0
+  },
+  "model_probability": 1.0,
+  "alternative": {
+   "class": "N4",
+   "probability": 0.0
+  },
+  "model_evidence": [
+   {
+    "feature": "file_count",
+    "observed_value": 28.0,
+    "shap_value": 4.195,
+    "direction": "지지",
+    "text": "첨부 파일 수 28 → 판정을 지지"
+   },
+   {
+    "feature": "max_request_bytes",
+    "observed_value": 243718.0,
+    "shap_value": 1.558,
+    "direction": "지지",
+    "text": "최대 단일 요청 크기 238.0KB → 판정을 지지"
+   },
+   {
+    "feature": "tenant_switch_count",
+    "observed_value": 2.0,
+    "shap_value": 1.111,
+    "direction": "지지",
+    "text": "테넌트 전환 횟수 2 → 판정을 지지"
+   },
+   {
+    "feature": "user_request_count_observed_1h",
+    "observed_value": 123.0,
+    "shap_value": -0.45,
+    "direction": "억제",
+    "text": "최근 1시간 요청 누적 123 → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_07_mix_te2_user_028_w18",
+  "window_start": "2026-11-07T20:30:00.000000+09:00",
+  "network_score": 64.8,
+  "network_grade": "경고",
+  "integrated_contribution": 25.9,
+  "threat": "N2",
+  "threat_name": "저속 누적 전송",
+  "score_breakdown": {
+   "base_score": 45.0,
+   "probability_score": 19.8,
+   "retry_score": 0.0
+  },
+  "model_probability": 0.992,
+  "alternative": {
+   "class": "N4",
+   "probability": 0.003
+  },
+  "model_evidence": [
+   {
+    "feature": "user_upload_bytes_observed_1h",
+    "observed_value": 10544443.0,
+    "shap_value": 1.992,
+    "direction": "지지",
+    "text": "최근 1시간 업로드 누적 10.1MB → 판정을 지지"
+   },
+   {
+    "feature": "max_request_bytes",
+    "observed_value": 25994.0,
+    "shap_value": 0.65,
+    "direction": "지지",
+    "text": "최대 단일 요청 크기 25.4KB → 판정을 지지"
+   },
+   {
+    "feature": "file_count",
+    "observed_value": 9.0,
+    "shap_value": 0.592,
+    "direction": "지지",
+    "text": "첨부 파일 수 9 → 판정을 지지"
+   },
+   {
+    "feature": "user_request_count_observed_1h",
+    "observed_value": 112.0,
+    "shap_value": -0.743,
+    "direction": "억제",
+    "text": "최근 1시간 요청 누적 112 → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_07_mix_te2_user_028_w19",
+  "window_start": "2026-11-07T20:35:00.000000+09:00",
+  "network_score": 50.0,
+  "network_grade": "경고",
+  "integrated_contribution": 20.0,
+  "threat": "N3",
+  "threat_name": "자동화 폭주",
+  "score_breakdown": {
+   "base_score": 30.0,
+   "probability_score": 20.0,
+   "retry_score": 0.0
+  },
+  "model_probability": 1.0,
+  "alternative": {
+   "class": "N4",
+   "probability": 0.0
+  },
+  "model_evidence": [
+   {
+    "feature": "declared_process_switch_count",
+    "observed_value": 10.0,
+    "shap_value": 4.593,
+    "direction": "지지",
+    "text": "프로세스 전환 횟수 10 → 판정을 지지"
+   },
+   {
+    "feature": "peak_concurrency",
+    "observed_value": 10.0,
+    "shap_value": 2.469,
+    "direction": "지지",
+    "text": "최대 동시 요청 수 10 → 판정을 지지"
+   },
+   {
+    "feature": "iat_mean_s",
+    "observed_value": 10.831454570476826,
+    "shap_value": 1.608,
+    "direction": "지지",
+    "text": "평균 요청 간격 10.8초 → 판정을 지지"
+   },
+   {
+    "feature": "user_upload_bytes_observed_1h",
+    "observed_value": 9796085.0,
+    "shap_value": -0.337,
+    "direction": "억제",
+    "text": "최근 1시간 업로드 누적 9.3MB → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_07_mix_te2_user_027_w21",
+  "window_start": "2026-11-07T20:45:00.000000+09:00",
+  "network_score": 60.0,
+  "network_grade": "경고",
+  "integrated_contribution": 24.0,
+  "threat": "N4",
+  "threat_name": "미승인 목적지",
+  "score_breakdown": {
+   "base_score": 40.0,
+   "probability_score": 20.0,
+   "retry_score": 0.0
+  },
+  "model_probability": 0.999,
+  "alternative": {
+   "class": "N2",
+   "probability": 0.001
+  },
+  "model_evidence": [
+   {
+    "feature": "provider_count",
+    "observed_value": 3.0,
+    "shap_value": 8.086,
+    "direction": "지지",
+    "text": "사용한 AI Provider 수 3 → 판정을 지지"
+   },
+   {
+    "feature": "user_request_count_observed_1h",
+    "observed_value": 127.0,
+    "shap_value": 0.749,
+    "direction": "지지",
+    "text": "최근 1시간 요청 누적 127 → 판정을 지지"
+   },
+   {
+    "feature": "download_packets",
+    "observed_value": 81.0,
+    "shap_value": 0.531,
+    "direction": "지지",
+    "text": "다운로드 패킷 수 81 → 판정을 지지"
+   },
+   {
+    "feature": "download_bytes",
+    "observed_value": 21672.0,
+    "shap_value": -0.419,
+    "direction": "억제",
+    "text": "다운로드량 21.2KB → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_07_mix_te2_user_027_w22",
+  "window_start": "2026-11-07T20:50:00.000000+09:00",
+  "network_score": 58.8,
+  "network_grade": "경고",
+  "integrated_contribution": 23.5,
+  "threat": "N5",
+  "threat_name": "Gateway 우회",
+  "score_breakdown": {
+   "base_score": 50.0,
+   "probability_score": 8.8,
+   "retry_score": 0.0
+  },
+  "model_probability": 0.442,
+  "alternative": {
+   "class": "normal",
+   "probability": 0.435
+  },
+  "model_evidence": [
+   {
+    "feature": "download_bytes",
+    "observed_value": 16237.0,
+    "shap_value": 0.388,
+    "direction": "지지",
+    "text": "다운로드량 15.9KB → 판정을 지지"
+   },
+   {
+    "feature": "session_count",
+    "observed_value": 6.0,
+    "shap_value": 0.26,
+    "direction": "지지",
+    "text": "세션 수 6 → 판정을 지지"
+   },
+   {
+    "feature": "user_request_count_observed_1h",
+    "observed_value": 111.0,
+    "shap_value": 0.252,
+    "direction": "지지",
+    "text": "최근 1시간 요청 누적 111 → 판정을 지지"
+   },
+   {
+    "feature": "file_count",
+    "observed_value": 5.0,
+    "shap_value": -0.392,
+    "direction": "억제",
+    "text": "첨부 파일 수 5 → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_08_mix_te2_user_001_w08",
+  "window_start": "2026-11-08T22:40:00.000000+09:00",
+  "network_score": 85.0,
+  "network_grade": "위험",
+  "integrated_contribution": 34.0,
+  "threat": "N6",
+  "threat_name": "차단 후 재시도",
+  "score_breakdown": {
+   "base_score": 60.0,
+   "probability_score": 20.0,
+   "retry_score": 5.0
+  },
+  "model_probability": 1.0,
+  "alternative": {
+   "class": "normal",
+   "probability": 0.0
+  },
+  "model_evidence": [
+   {
+    "feature": "tenant_switch_count",
+    "observed_value": 2.0,
+    "shap_value": 6.515,
+    "direction": "지지",
+    "text": "테넌트 전환 횟수 2 → 판정을 지지"
+   },
+   {
+    "feature": "max_request_bytes",
+    "observed_value": 44427.0,
+    "shap_value": 0.806,
+    "direction": "지지",
+    "text": "최대 단일 요청 크기 43.4KB → 판정을 지지"
+   },
+   {
+    "feature": "request_body_bytes",
+    "observed_value": 168882.0,
+    "shap_value": 0.662,
+    "direction": "지지",
+    "text": "요청 본문 크기 164.9KB → 판정을 지지"
+   },
+   {
+    "feature": "download_bytes",
+    "observed_value": 19647.0,
+    "shap_value": -0.07,
+    "direction": "억제",
+    "text": "다운로드량 19.2KB → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [
+   "Gateway 차단 이후 재시도 1회 기록 → +5점"
+  ],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ },
+ {
+  "window_id": "mix_run_07_mix_te2_user_027_w07",
+  "window_start": "2026-11-07T19:35:00.000000+09:00",
+  "network_score": 0.0,
+  "network_grade": "정상",
+  "integrated_contribution": 0.0,
+  "threat": "normal",
+  "threat_name": "정상",
+  "score_breakdown": {
+   "base_score": 0.0,
+   "probability_score": 0.0,
+   "retry_score": 0.0
+  },
+  "model_probability": 0.999,
+  "alternative": {
+   "class": "N5",
+   "probability": 0.001
+  },
+  "model_evidence": [
+   {
+    "feature": "iat_std_s",
+    "observed_value": 0.5258736107238767,
+    "shap_value": 2.494,
+    "direction": "지지",
+    "text": "요청 간격 표준편차 0.5초 → 판정을 지지"
+   },
+   {
+    "feature": "declared_process_switch_count",
+    "observed_value": 0.0,
+    "shap_value": 1.898,
+    "direction": "지지",
+    "text": "프로세스 전환 횟수 0 → 판정을 지지"
+   },
+   {
+    "feature": "provider_count",
+    "observed_value": 1.0,
+    "shap_value": 0.659,
+    "direction": "지지",
+    "text": "사용한 AI Provider 수 1 → 판정을 지지"
+   },
+   {
+    "feature": "iat_cv",
+    "observed_value": 1.7354511036607647,
+    "shap_value": -0.896,
+    "direction": "억제",
+    "text": "요청 간격 변동계수 1.74 → 판정을 억제"
+   }
+  ],
+  "rule_evidence": [],
+  "note": "점수는 검토 우선순위용이며 위반 확정이 아닙니다. SHAP 기여도는 인과관계가 아닙니다."
+ }
+]

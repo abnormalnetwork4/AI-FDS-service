@@ -61,6 +61,20 @@ class AIUsageEvent(Model):
     file_count: Count = 0
     approved_destination: bool | None = None
     policy_action: Literal["allow", "block", "review", "unknown"] = "unknown"
+    # 아래는 Network 모델 입력용 선택 항목입니다. 미확인이면 생략합니다.
+    completed_at: AwareDatetime | None = None  # 응답 완료 시각: 동시 요청 수 계산
+    tenant: str | None = Field(default=None, min_length=1, max_length=100)  # 사용 계정 구분(회사/개인 등)
+    retry_after_block: bool | None = None  # Gateway 차단 이후 재시도로 기록된 요청
+
+    @model_validator(mode="after")
+    def valid_completion(self):
+        if self.completed_at is not None and self.completed_at < self.occurred_at:
+            raise ValueError("completed_at must be >= occurred_at")
+        return self
+
+
+# 위 세 항목이 None이면 재전송 지문 계산에서 생략합니다. 기존 캡처 재전송 지문이 바뀌지 않게 하기 위함입니다.
+OPTIONAL_EVENT_FIELDS = ("completed_at", "tenant", "retry_after_block")
 
 
 class WindowRequest(Model):
@@ -86,6 +100,37 @@ class BehaviorFeatures(Model):
     file_count: Count
 
 
+class NetworkModelFeatures(Model):
+    # model/network 의 XGBoost 입력 24개입니다. 이름·의미는 학습 데이터(v3 behavior window)와 같습니다.
+    # None은 관측 불가(예: 요청 1건이라 간격 없음)이며 모델이 학습 중앙값으로 대체합니다.
+    provider_count: float
+    session_count: float
+    request_count: float
+    upload_bytes: float
+    download_bytes: float
+    upload_packets: float
+    download_packets: float
+    request_body_bytes: float
+    file_count: float
+    max_request_bytes: float | None
+    iat_mean_s: float | None
+    iat_std_s: float | None
+    iat_cv: float | None
+    peak_concurrency: float
+    destination_switch_count: float
+    tenant_switch_count: float
+    declared_process_switch_count: float
+    request_rate_per_min: float
+    upload_download_ratio: float | None
+    off_hours_fraction: float | None
+    user_upload_bytes_observed_1h: float
+    user_request_count_observed_1h: float
+    history_coverage_seconds_1h: float
+    history_complete_1h: float
+    # 모델 입력이 아니라 규칙 근거(재시도 가산점)로만 씁니다.
+    retry_count_after_block: float = 0
+
+
 class BehaviorWindow(Model):
     # 특정 시점에 계산해 저장한 행동 통계입니다. 뒤늦게 들어온 기록으로 자동 갱신되지는 않습니다.
     id: str
@@ -95,6 +140,8 @@ class BehaviorWindow(Model):
     end: AwareDatetime
     duration_minutes: Literal[5, 60]
     features: BehaviorFeatures
+    # 이전 버전에서 저장된 Window에는 없습니다.
+    model_features: NetworkModelFeatures | None = None
     created_at: AwareDatetime = Field(default_factory=now)
 
 

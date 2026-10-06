@@ -3,7 +3,8 @@ from datetime import timedelta, timezone
 from uuid import uuid4
 
 from .repository import Repository
-from .schemas import AIUsageEvent, BehaviorFeatures, BehaviorWindow, DashboardSummary, NetworkSession, RiskResult, WindowRequest
+from .schemas import (AIUsageEvent, BehaviorFeatures, BehaviorWindow, DashboardSummary, NetworkModelFeatures,
+                      NetworkSession, RiskResult, WindowRequest)
 
 
 def build_window(repo: Repository, request: WindowRequest) -> BehaviorWindow:
@@ -16,10 +17,12 @@ def compute_window(request: WindowRequest, sessions: list[NetworkSession], event
     # 계산만 수행하고 DB를 수정하지 않습니다. 자동 수집 경로에서도 재사용합니다.
     start = request.start.astimezone(timezone.utc)
     end = start + timedelta(minutes=request.duration_minutes)
+    user_sessions = [s for s in sessions if s.user_id == request.user_id]
+    user_events = [e for e in events if e.user_id == request.user_id]
     # 같은 사용자·단말에서 구간 시작 이상, 구간 끝 미만인 기록만 고릅니다.
     # 세션이 구간을 가로질러도 전체 전송량을 시작 시각에 귀속하는 기본 집계 방식입니다.
-    sessions = [s for s in sessions if s.user_id == request.user_id and s.device_id == request.device_id and start <= s.started_at < end]
-    events = [e for e in events if e.user_id == request.user_id and e.device_id == request.device_id and start <= e.occurred_at < end]
+    sessions = [s for s in user_sessions if s.device_id == request.device_id and start <= s.started_at < end]
+    events = [e for e in user_events if e.device_id == request.device_id and start <= e.occurred_at < end]
     window = BehaviorWindow(
         id=str(uuid4()), user_id=request.user_id, device_id=request.device_id,
         start=start, end=end, duration_minutes=request.duration_minutes,
@@ -37,8 +40,65 @@ def compute_window(request: WindowRequest, sessions: list[NetworkSession], event
             blocked_ai_requests=sum(e.policy_action == "block" for e in events),
             file_count=sum(e.file_count for e in events),
         ),
+        model_features=model_features(sessions, events, user_sessions, user_events, end, request.duration_minutes),
     )
     return window
+
+
+# 업무시간(한국 시간 08:00~19:00). 학습 데이터 실행 시각과 off_hours_fraction 값으로 추정한 경계입니다.
+KST = timezone(timedelta(hours=9))
+BUSINESS_HOURS = (8, 19)
+
+
+def switches(values):
+    values = [v for v in values if v is not None]
+    return sum(a != b for a, b in zip(values, values[1:]))
+
+
+def model_features(sessions, events, user_sessions, user_events, end, minutes) -> NetworkModelFeatures:
+    # 학습 데이터(v3 behavior window)와 같은 정의입니다. 원본 v0 로그로 재계산해 behavior_windows.csv와 대조했습니다.
+    # 요청 단위 값은 AI 사용 이벤트, 송수신량은 네트워크 세션에서 계산합니다.
+    events = sorted(events, key=lambda e: e.occurred_at)
+    destination = {s.id: s.destination for s in user_sessions}  # 이벤트의 세션은 구간 이전에 시작했을 수 있음
+    times = [e.occurred_at for e in events]
+    gaps = [(b - a).total_seconds() for a, b in zip(times, times[1:])]
+    iat_mean = sum(gaps) / len(gaps) if gaps else None
+    iat_std = (sum((g - iat_mean) ** 2 for g in gaps) / len(gaps)) ** 0.5 if gaps else None  # 모표준편차(ddof=0)
+    # 동시 요청 수: 요청~응답 구간이 겹치는 최대 개수. 응답 시각이 없으면 요청 시점 하나로 봅니다.
+    spans = [(e.occurred_at, e.completed_at or e.occurred_at) for e in events]
+    peak = max((1 + sum(o_start <= s < o_end for j, (o_start, o_end) in enumerate(spans) if j != i)
+                for i, (s, _) in enumerate(spans)), default=0)
+    upload, download = sum(s.bytes_sent for s in sessions), sum(s.bytes_received for s in sessions)
+    # 최근 1시간 누적은 단말·Provider 구분 없이 사용자 전체 기록이며, 이력 길이는 이 사용자의 첫 관측부터 셉니다.
+    since = end - timedelta(hours=1)
+    first = min([s.started_at for s in user_sessions] + [e.occurred_at for e in user_events], default=end)
+    coverage = min(3600.0, max(0.0, (end - first).total_seconds()))
+    off_hours = [not BUSINESS_HOURS[0] <= t.astimezone(KST).hour < BUSINESS_HOURS[1] for t in times]
+    return NetworkModelFeatures(
+        provider_count=len({e.provider for e in events}),
+        session_count=len({s.parent_session_id or s.id for s in sessions}),
+        request_count=len(events),
+        upload_bytes=upload, download_bytes=download,
+        upload_packets=sum(s.packets_sent for s in sessions),
+        download_packets=sum(s.packets_received for s in sessions),
+        request_body_bytes=sum(e.request_bytes for e in events),
+        file_count=sum(e.file_count for e in events),
+        max_request_bytes=max((e.request_bytes for e in events), default=None),
+        iat_mean_s=iat_mean, iat_std_s=iat_std,
+        iat_cv=iat_std / iat_mean if iat_mean else None,
+        peak_concurrency=peak,
+        destination_switch_count=switches([destination.get(e.session_id) for e in events]),
+        tenant_switch_count=switches([e.tenant for e in events]),
+        declared_process_switch_count=switches([e.process_name for e in events]),
+        request_rate_per_min=len(events) / minutes,
+        upload_download_ratio=upload / download if download else None,
+        off_hours_fraction=sum(off_hours) / len(off_hours) if off_hours else None,
+        user_upload_bytes_observed_1h=sum(s.bytes_sent for s in user_sessions if since <= s.started_at < end),
+        user_request_count_observed_1h=sum(since <= e.occurred_at < end for e in user_events),
+        history_coverage_seconds_1h=coverage,
+        history_complete_1h=float(coverage >= 3600),
+        retry_count_after_block=sum(bool(e.retry_after_block) for e in events),
+    )
 
 
 def dashboard(repo: Repository, user_id: str | None) -> DashboardSummary:

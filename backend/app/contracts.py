@@ -60,11 +60,24 @@ class EventIngest(Model):
     provider: str | None = Field(default=None, min_length=1, max_length=100)
     channel: Literal["web", "api"] = "api"
     prompt: PromptObservation | None = None
+    # Network 모델 입력용 선택 항목입니다. 패킷 수는 바이트와 같이 이번 관측의 증가량입니다.
+    packets_sent: Count = 0
+    packets_received: Count = 0
+    # 아래는 AI 사용 로그 항목이라 provider가 있을 때만 받습니다.
+    request_bytes: Count | None = None  # HTTP 요청 본문 크기. 생략 시 bytes_sent 사용
+    file_count: Count = 0
+    process_name: str | None = Field(default=None, max_length=255)
+    tenant: str | None = Field(default=None, min_length=1, max_length=100)
+    completed_at: AwareDatetime | None = None
+    retry_after_block: bool | None = None
 
     @model_validator(mode="after")
     def prompt_requires_application_event(self):
         if self.prompt is not None and (self.source != "application_log" or self.provider is None):
             raise ValueError("Prompt requires an application_log event with provider")
+        app_fields = (self.request_bytes, self.process_name, self.tenant, self.completed_at, self.retry_after_block)
+        if self.provider is None and (self.file_count or any(v is not None for v in app_fields)):
+            raise ValueError("AI usage fields require provider")
         return self
 
     def as_capture(self):
@@ -75,11 +88,15 @@ class EventIngest(Model):
             user_id=self.user_id, device_id=self.device_id, started_at=self.occurred_at,
             ended_at=self.occurred_at, destination=self.destination, source=self.source,
             bytes_sent=self.bytes_sent, bytes_received=self.bytes_received,
+            packets_sent=self.packets_sent, packets_received=self.packets_received,
         )
         event = AIUsageEvent(id="usage-" + hashlib.sha256(self.id.encode()).hexdigest(),
             session_id=observation_id, user_id=self.user_id, device_id=self.device_id,
             occurred_at=self.occurred_at, provider=self.provider, channel=self.channel,
-            request_bytes=self.bytes_sent) if self.provider is not None else None
+            request_bytes=self.bytes_sent if self.request_bytes is None else self.request_bytes,
+            file_count=self.file_count, process_name=self.process_name, tenant=self.tenant,
+            completed_at=self.completed_at, retry_after_block=self.retry_after_block,
+        ) if self.provider is not None else None
         return CaptureIngest(id=self.id, session=session, ai_event=event, prompt=self.prompt)
 
 

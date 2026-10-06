@@ -1,3 +1,7 @@
 fastapi==0.141.1
 pydantic==2.13.5
 uvicorn==0.53.0
+# Network 모델(model/network) 실행용. 학습 환경과 같은 버전입니다.
+numpy==2.5.3
+pandas==3.0.6
+xgboost==3.4.1
