@@ -6,10 +6,10 @@ from typing import Protocol
 from .schemas import BehaviorWindow, DataRiskRequest, Finding, RiskResult
 
 DATA_CATEGORIES = {
-    "sensitive_data": "민감정보 유출",
-    "non_business": "업무 목적 외 오남용",
-    "model_extraction": "토큰 자원 낭비 / 모델 추출",
-    "prompt_manipulation": "모델 교란 / Prompt Injection",
+    "AI_steal": "인공지능 증류",
+    "prompt_injection": "프롬프트 인젝션",
+    "abuse_act": "업무 외 사용",
+    "token_waste_repeat": "무작위 토큰 사용",
 }
 NETWORK_CATEGORIES = {
     "N1": "비정상 대량 업로드",

@@ -20,7 +20,7 @@ flowchart LR
 
 관측된 세션·선택적인 AI 사용 로그 수신, 사용자·단말·세션·시간 연결 검증, 관측 자료 우선 저장, 최근 5분/1시간 집계, Data/Network 엔진 연결, 재전송 중복 방지, 결과·통계 조회를 구현했습니다.
 
-실제 탐지 모델은 미연결입니다. `status: pending`, `score: null`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
+All_in_one 프롬프트 모델(TF-IDF + XGBoost 네 분류기)을 연결했습니다. 네트워크 모델과 통합 등급 정책은 아직 미연결입니다. 프롬프트 분류가 완료되어도 위험 점수는 `null`이며 각 항목의 `detected`, `probability`, `threshold`로 결과를 제공합니다. `status: pending`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
 
 ## 설치·실행
 
@@ -40,6 +40,8 @@ py -3.12 -m venv .venv
 - 기본 DB: `backend/data/passive-fds.sqlite3`
 - DB 변경: 서버 시작 전 `$env:DATABASE_PATH = '원하는파일경로'`
 - 브라우저 조회 허용 주소: `CORS_ORIGINS` (기본 `http://localhost:3000,http://localhost:5173`)
+
+기본 실행은 `models/all-in-one`의 모델을 서버 시작 시 한 번 불러옵니다. 요청마다 학습하지 않습니다. `/health`의 `data_engine: AllInOneDataRiskEngine`과 `prompt_model_version`으로 연결 상태를 확인합니다. 모델 파일 누락·해시 불일치·라이브러리 버전 불일치 시 시작을 실패시키며 Stub으로 몰래 바꾸지 않습니다. 모델 없이 수집 기능만 확인하려면 시작 전에 `$env:PROMPT_ENGINE = 'stub'`을 지정하고, 실제 모델로 복귀하려면 `Remove-Item Env:PROMPT_ENGINE` 후 재시작합니다. 다른 모델 폴더는 `PROMPT_MODEL_DIR`로 지정할 수 있습니다.
 
 ## 관측 자료 전송
 
@@ -141,9 +143,33 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 
 원문은 앞뒤 공백·개행을 보존해 모델에 전달하며 DB에는 저장하지 않습니다. 수집 입력 상한은 131,072자, 현재 Data 모델 계약은 16,384자입니다. 모델 상한을 넘는 관측은 메타데이터를 저장하고 `prompt_too_large`로 표시합니다. 수집 상한보다 큰 원문은 수집기에서 생략하고 메타데이터만 보내야 합니다. 원문이 없거나 비어 있으면 Data 모델을 호출하지 않습니다.
 
-`app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)`를 구현해 `app/main.py`의 `create_app()`에 전달합니다. 학습 때의 전처리·특징 순서·점수 의미를 유지하고 원문을 결과 근거에 그대로 복사하지 않도록 구현합니다. 자세한 연결 위치는 한국어 코드 주석을 참고하세요.
+`app/prompt_engine.py`가 `request.text`를 모델에 전달합니다. 받은 노트북과 같은 NFKC·개행 정리·앞뒤 공백 제거, 공통 TF-IDF, 네 XGBoost 분류기, `probability > 0.5` 판정을 사용합니다. 네 항목은 `AI_steal`, `prompt_injection`, `abuse_act`, `token_waste_repeat`이며 복수 탐지가 가능합니다. 모든 항목 미탐지는 실제 안전·정책 준수를 보장하지 않습니다. `input_origin`은 결과에 보존하지만 기존 모델은 문장만 분류하므로 출처·업무 맥락을 학습 특징으로 사용하지 않습니다.
 
-실제 ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 대시보드 화면과 저장 결과 요약은 연결돼 있습니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
+분류 결과 예시(형식 설명용 숫자):
+
+```json
+{"code":"AI_steal","name":"인공지능 증류","status":"complete","score":null,"detected":true,"probability":0.91,"threshold":0.5,"reason":"라벨 정의이며 개별 판단 근거는 미제공"}
+```
+
+`status: complete`는 점수가 없어도 분류 완료를 뜻할 수 있습니다. 예측 확률을 위험 점수로 변환하지 않고 엔진 평균·통합 등급에도 넣지 않습니다. 기존 점수형 엔진 출력과 과거 DB 기록은 계속 읽을 수 있습니다. 원문·예외 상세는 저장하지 않으며 표시되는 설명은 라벨 정의입니다.
+
+실제 모델 → 수집 API → 저장 → 화면 연결 확인:
+
+```powershell
+.\.venv\Scripts\python.exe examples/prompt_model_demo.py
+```
+
+받은 원본에는 모델 체크포인트가 없어 기본 546,973건 구성으로 한 번 학습해 저장했습니다. 추가 보강 실험·튜닝·임계값 조정은 적용하지 않았습니다. 모델과 전처리 파일·해시는 `models/all-in-one/manifest.json`에 있습니다. 학습 데이터와 원본 노트북은 이 저장소에 복제하지 않았습니다. 동일 원본을 가진 팀원은 다음과 같이 새 폴더에 재생성할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/train_prompt_model.py --source 'C:\경로\All_in_one' --output 'models/all-in-one-retrained'
+```
+
+학습 도구는 검토한 원본 노트북의 SHA-256을 확인하고 설정·전처리·학습 정의 셀만 실행합니다. 원본 CSV 수정, 전체 Run All, 테스트 기반 튜닝은 하지 않습니다. 소스가 바뀌면 해시만 바꾸지 말고 해당 코드를 재검토해야 합니다. TF-IDF joblib 파일은 신뢰하는 학습 절차에서 생성한 것만 배포합니다.
+
+다른 엔진 연결은 `app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)` 계약을 구현해 `create_app()`에 전달합니다.
+
+현재 프롬프트 모델은 AI·규칙 잠정 라벨 기반 시범 모델이며 오탐 개선이나 실사용 성능 검증을 완료한 것이 아닙니다. 네트워크 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
 
 ## 이전 Gateway 버전에서 변경된 점
 

@@ -2,6 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEvent, eventLevel, nullableScore, fetchEventPage } from './events.js';
 
+test('classification probability is displayed separately from risk score and overall safety', () => {
+  const row = normalizeEvent({ id: 'classified', prompt_reasons: [
+    { code: 'AI_steal', status: 'complete', detected: true, probability: .9, threshold: .5 },
+    { code: 'abuse_act', status: 'complete', detected: false, probability: .5, threshold: .5 },
+    { code: 'bad', status: 'error', detected: false, probability: 0, threshold: .5 },
+  ] });
+  assert.equal(row.prompt_reasons[0].status, 'detected');
+  assert.equal(row.prompt_reasons[0].probability, .9);
+  assert.equal(row.prompt_reasons[0].score, null);
+  assert.equal(row.prompt_reasons[1].status, 'not_detected');
+  assert.equal(row.prompt_reasons[2].status, 'error');
+  assert.equal(row.prompt_reasons[2].probability, null);
+  assert.equal(row.score, null);
+  assert.equal(eventLevel(row), 'pending');
+});
+
 test('missing values never become safe, zero confidence or fabricated contributions', () => {
   const row = normalizeEvent({ id: 'capture', network_reasons: [{ code: 'N1', status: 'pending' }] });
   assert.equal(eventLevel(row), 'pending');
