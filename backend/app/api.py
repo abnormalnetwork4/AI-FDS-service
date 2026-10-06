@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from . import services, dashboard
-from .collection import ingest
+from .collection import analyze_safely, ingest
 from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest
 from .live import changes
 from .repository import Repository
@@ -59,7 +59,7 @@ def list_windows(repo: Repo, user_id: str | None = None, limit: Limit = 50, offs
 
 @router.post("/data-risk/analyze", response_model=RiskResult, status_code=201, tags=["위험 분석"])
 def analyze_data(body: DataRiskRequest, request: Request, repo: Repo):
-    result = request.app.state.data_engine.analyze(body)
+    result = analyze_safely(request.app.state.data_engine, body, body.user_id, "data", None)
     # 모델에 원문을 전달하되 저장소에는 분석 결과만 넣습니다.
     return repo.save("risk", result)
 
