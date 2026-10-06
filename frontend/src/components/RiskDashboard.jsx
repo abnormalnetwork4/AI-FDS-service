@@ -1,5 +1,6 @@
 import { LEVELS, eventLevel, fetchEventPage } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
+import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldAlert,
@@ -1058,6 +1059,8 @@ export default function RiskDashboard() {
           </button>
         </div>
       </div>
+
+      {!isMock && <PromptTester apiBase={API_BASE} />}
 
       {status === "error" && events.length > 0 && (
         <div className="stale-banner">
