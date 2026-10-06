@@ -13,6 +13,15 @@ from .engines import DataRiskEngine, NetworkRiskEngine, StubDataRiskEngine, Stub
 from .repository import ConflictError, ReferenceError, Repository
 
 
+def default_network_engine() -> NetworkRiskEngine:
+    # 기본은 model/network 의 XGBoost 모델입니다. NETWORK_ENGINE=stub 이면 모델 없이 자리 표시자를 씁니다.
+    # 모델 파일·패키지가 없으면 서버 시작 시 바로 실패합니다. 조용히 Stub으로 바꾸면 미판정이 정상처럼 보일 수 있습니다.
+    if os.getenv("NETWORK_ENGINE", "xgboost") == "stub":
+        return StubNetworkRiskEngine()
+    from .network_model import XGBoostNetworkRiskEngine
+    return XGBoostNetworkRiskEngine()
+
+
 def create_app(
     database_path: Path | None = None,
     data_engine: DataRiskEngine | None = None,
@@ -36,7 +45,7 @@ def create_app(
     # app.state는 여러 API 함수가 공유하는 객체 보관 장소입니다.
     # 실제 어댑터는 모델을 미리 로딩해 재사용하도록 구현합니다. 아래 Stub은 학습 모델을 불러오지 않습니다.
     app.state.data_engine = data_engine if data_engine is not None else StubDataRiskEngine()
-    app.state.network_engine = network_engine if network_engine is not None else StubNetworkRiskEngine()
+    app.state.network_engine = network_engine if network_engine is not None else default_network_engine()
     origins = [v.strip() for v in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",") if v.strip()]
     # CORS는 브라우저가 다른 주소의 API를 호출할 때 적용하는 규칙입니다. 로그인·권한 검사 기능은 아닙니다.
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"], allow_headers=["Content-Type"])

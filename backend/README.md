@@ -20,7 +20,7 @@ flowchart LR
 
 관측된 세션·선택적인 AI 사용 로그 수신, 사용자·단말·세션·시간 연결 검증, 관측 자료 우선 저장, 최근 5분/1시간 집계, Data/Network 엔진 연결, 재전송 중복 방지, 결과·통계 조회를 구현했습니다.
 
-실제 탐지 모델은 미연결입니다. `status: pending`, `score: null`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
+Network 엔진은 [`model/network`](../model/network/)의 XGBoost 모델(5분 구간)이 기본 연결돼 있습니다. Data 엔진은 아직 미연결(Stub)입니다. `NETWORK_ENGINE=stub`으로 서버를 시작하면 Network도 Stub을 씁니다. `status: pending`, `score: null`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
 
 ## 설치·실행
 
@@ -65,6 +65,8 @@ py -3.12 -m venv .venv
 ```
 
 같은 통신의 다음 이벤트는 같은 `session_id`와 새로운 `id`를 사용합니다. 재전송만 기존 이벤트 ID와 동일한 내용을 사용합니다. 바이트는 **이번 관측의 증가량**이며 누적 전송량을 반복해서 보내면 안 됩니다. 같은 세션의 이벤트들은 바이트·요청 수는 누적하되 세션 수는 한 번만 셉니다. 캡처 경로와 이벤트 경로에 같은 트래픽을 중복 등록하지 마세요.
+
+Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증가량), `request_bytes`(HTTP 본문 크기, 생략 시 `bytes_sent`), `file_count`, `process_name`, `tenant`, `completed_at`(응답 완료 시각), `retry_after_block`. `provider`가 있을 때만 AI 사용 로그 항목을 받습니다(패킷 수 제외). 모델은 AI 사용 로그가 있는 5분 구간만 점수를 내며, 로그 없는 구간과 60분 구간은 `pending`입니다. 자세한 피처 정의는 [model/network README](../model/network/README.md#백엔드-연결)를 참고하세요.
 
 `provider`와 `prompt`는 선택 항목입니다. 프롬프트가 있으면 `source: application_log`와 `provider`가 필요합니다. 네트워크 메타데이터만 있는 경우에는 두 필드를 생략할 수 있습니다. 내부 저장용 관측 ID와 원래 `session_id`를 분리하며, 대시보드는 원래 세션 ID를 보여줍니다. 기본 세션 조회의 `parent_session_id`로 원래 세션을 확인할 수 있습니다.
 
@@ -141,9 +143,9 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 
 원문은 앞뒤 공백·개행을 보존해 모델에 전달하며 DB에는 저장하지 않습니다. 수집 입력 상한은 131,072자, 현재 Data 모델 계약은 16,384자입니다. 모델 상한을 넘는 관측은 메타데이터를 저장하고 `prompt_too_large`로 표시합니다. 수집 상한보다 큰 원문은 수집기에서 생략하고 메타데이터만 보내야 합니다. 원문이 없거나 비어 있으면 Data 모델을 호출하지 않습니다.
 
-`app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)`를 구현해 `app/main.py`의 `create_app()`에 전달합니다. 학습 때의 전처리·특징 순서·점수 의미를 유지하고 원문을 결과 근거에 그대로 복사하지 않도록 구현합니다. 자세한 연결 위치는 한국어 코드 주석을 참고하세요.
+Network 엔진 연결 예시는 `app/network_model.py`입니다. `app/engines.py`의 `DataRiskEngine.analyze(request)`를 구현해 `app/main.py`의 `create_app()`에 전달합니다. 학습 때의 전처리·특징 순서·점수 의미를 유지하고 원문을 결과 근거에 그대로 복사하지 않도록 구현합니다. 자세한 연결 위치는 한국어 코드 주석을 참고하세요.
 
-실제 ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 대시보드 화면과 저장 결과 요약은 연결돼 있습니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
+Data ML 모델, 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 대시보드 화면과 저장 결과 요약은 연결돼 있습니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
 
 ## 이전 Gateway 버전에서 변경된 점
 
