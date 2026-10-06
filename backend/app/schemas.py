@@ -9,6 +9,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 Identifier = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:@-]+$")]
 Count = Annotated[int, Field(ge=0, strict=True)]
 Score = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
+Probability = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 
 
 def now() -> datetime:
@@ -119,12 +120,24 @@ class Finding(Model):
     name: str
     status: Literal["pending", "complete", "error"] = "pending"
     score: Score | None = None
+    # 분류 모델의 출력은 위험도 점수와 구분합니다. 기존 점수형 엔진도 계속 지원합니다.
+    detected: bool | None = Field(default=None, strict=True)
+    probability: Probability | None = None
+    threshold: Annotated[float, Field(gt=0, lt=1, allow_inf_nan=False)] | None = None
     reason: str
 
     @model_validator(mode="after")
     def score_matches_status(self):
-        if (self.status == "complete") != (self.score is not None):
-            raise ValueError("Only complete findings must have a score")
+        has_classification = any(v is not None for v in (self.detected, self.probability, self.threshold))
+        if self.status != "complete" and (self.score is not None or has_classification):
+            raise ValueError("Unfinished findings cannot carry scores or classifications")
+        if self.status == "complete" and self.score is None and not has_classification:
+            raise ValueError("Complete findings require a score or classification")
+        if has_classification:
+            if any(v is None for v in (self.detected, self.probability, self.threshold)):
+                raise ValueError("Classification requires detected, probability and threshold")
+            if self.detected != (self.probability > self.threshold):
+                raise ValueError("Classification must match its probability threshold")
         return self
 
 
@@ -138,14 +151,15 @@ class RiskResult(Model):
     source_event_id: str | None = None
     status: Literal["pending", "complete", "error"]
     score: Score | None = None
+    input_origin: Literal["direct_user", "external_document", "tool_output"] | None = None
     findings: list[Finding]
     created_at: AwareDatetime = Field(default_factory=now)
 
     @model_validator(mode="after")
     def consistent_result(self):
         # 미완료 분석에 숫자 점수를 붙이거나 일부 항목이 미완료인데 전체 완료로 표시하는 것을 막습니다.
-        if (self.status == "complete") != (self.score is not None):
-            raise ValueError("Only complete results must have a score")
+        if self.status != "complete" and self.score is not None:
+            raise ValueError("Unfinished results cannot have a score")
         if self.status == "complete" and (not self.findings or any(f.status != "complete" for f in self.findings)):
             raise ValueError("Complete results require complete findings")
         return self
