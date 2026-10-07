@@ -1,7 +1,7 @@
 fastapi==0.141.1
 pydantic==2.13.5
 uvicorn==0.53.0
-# 프롬프트 모델(models/all-in-one)과 Network 모델(model/network) 실행용
+# 프롬프트 모델(model/prompt)과 Network 모델(model/network) 실행용
 numpy==2.3.5
 pandas==3.0.6
 scikit-learn==1.7.2

@@ -41,7 +41,7 @@ py -3.12 -m venv .venv
 - DB 변경: 서버 시작 전 `$env:DATABASE_PATH = '원하는파일경로'`
 - 브라우저 조회 허용 주소: `CORS_ORIGINS` (기본 `http://localhost:3000,http://localhost:5173`)
 
-기본 실행은 `models/all-in-one`의 모델을 서버 시작 시 한 번 불러옵니다. 요청마다 학습하지 않습니다. `/health`의 `data_engine: AllInOneDataRiskEngine`과 `prompt_model_version`으로 연결 상태를 확인합니다. 모델 파일 누락·해시 불일치·라이브러리 버전 불일치 시 시작을 실패시키며 Stub으로 몰래 바꾸지 않습니다. 모델 없이 수집 기능만 확인하려면 시작 전에 `$env:PROMPT_ENGINE = 'stub'`을 지정하고, 실제 모델로 복귀하려면 `Remove-Item Env:PROMPT_ENGINE` 후 재시작합니다. 다른 모델 폴더는 `PROMPT_MODEL_DIR`로 지정할 수 있습니다.
+기본 실행은 [`model/prompt/all-in-one`](../model/prompt/)의 모델을 서버 시작 시 한 번 불러옵니다. 요청마다 학습하지 않습니다. `/health`의 `data_engine: AllInOneDataRiskEngine`과 `prompt_model_version`으로 연결 상태를 확인합니다. 모델 파일 누락·해시 불일치·라이브러리 버전 불일치 시 시작을 실패시키며 Stub으로 몰래 바꾸지 않습니다. 모델 없이 수집 기능만 확인하려면 시작 전에 `$env:PROMPT_ENGINE = 'stub'`을 지정하고, 실제 모델로 복귀하려면 `Remove-Item Env:PROMPT_ENGINE` 후 재시작합니다. 다른 모델 폴더는 `PROMPT_MODEL_DIR`로 지정할 수 있습니다.
 
 ## 관측 자료 전송
 
@@ -161,10 +161,10 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 .\.venv\Scripts\python.exe examples/prompt_model_demo.py
 ```
 
-받은 원본에는 모델 체크포인트가 없어 기본 546,973건 구성으로 한 번 학습해 저장했습니다. 추가 보강 실험·튜닝·임계값 조정은 적용하지 않았습니다. 모델과 전처리 파일·해시는 `models/all-in-one/manifest.json`에 있습니다. 학습 데이터와 원본 노트북은 이 저장소에 복제하지 않았습니다. 동일 원본을 가진 팀원은 다음과 같이 새 폴더에 재생성할 수 있습니다.
+받은 원본에는 모델 체크포인트가 없어 기본 546,973건 구성으로 한 번 학습해 저장했습니다. 추가 보강 실험·튜닝·임계값 조정은 적용하지 않았습니다. 모델과 전처리 파일·해시는 `model/prompt/all-in-one/manifest.json`에 있습니다. 학습 데이터와 원본 노트북은 이 저장소에 복제하지 않았습니다. 동일 원본을 가진 팀원은 다음과 같이 새 폴더에 재생성할 수 있습니다.
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/train_prompt_model.py --source 'C:\경로\All_in_one' --output 'models/all-in-one-retrained'
+.\.venv\Scripts\python.exe scripts/train_prompt_model.py --source 'C:\경로\All_in_one' --output '../model/prompt/all-in-one-retrained'
 ```
 
 학습 도구는 검토한 원본 노트북의 SHA-256을 확인하고 설정·전처리·학습 정의 셀만 실행합니다. 원본 CSV 수정, 전체 Run All, 테스트 기반 튜닝은 하지 않습니다. 소스가 바뀌면 해시만 바꾸지 말고 해당 코드를 재검토해야 합니다. TF-IDF joblib 파일은 신뢰하는 학습 절차에서 생성한 것만 배포합니다.

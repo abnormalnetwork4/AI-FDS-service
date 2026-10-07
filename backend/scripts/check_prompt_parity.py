@@ -36,6 +36,6 @@ def check(source, model_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--model-dir", type=Path, default=Path(__file__).resolve().parents[1] / "models" / "all-in-one")
+    parser.add_argument("--model-dir", type=Path, default=Path(__file__).resolve().parents[2] / "model" / "prompt" / "all-in-one")
     args = parser.parse_args()
     check(args.source, args.model_dir)

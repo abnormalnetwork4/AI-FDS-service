@@ -81,5 +81,5 @@ def configured_data_engine():
         return StubDataRiskEngine()
     if mode != "all-in-one":
         raise ValueError("PROMPT_ENGINE must be all-in-one or stub")
-    default = Path(__file__).resolve().parents[1] / "models" / "all-in-one"
+    default = Path(__file__).resolve().parents[2] / "model" / "prompt" / "all-in-one"
     return AllInOneDataRiskEngine(Path(os.getenv("PROMPT_MODEL_DIR", str(default))))
