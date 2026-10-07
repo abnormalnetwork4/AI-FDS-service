@@ -8,6 +8,7 @@ from pathlib import Path
 from .schemas import AIUsageEvent, NetworkSession
 from .scoring import fuse_parts
 from .window_repository import WindowRepository
+from .clear_repository import ClearRepository
 
 
 class ConflictError(Exception):
@@ -18,7 +19,7 @@ class ReferenceError(Exception):
     pass
 
 
-class Repository(WindowRepository):
+class Repository(ClearRepository, WindowRepository):
     def __init__(self, path: Path):
         self.path = path
 

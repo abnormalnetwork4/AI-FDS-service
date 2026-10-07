@@ -834,7 +834,8 @@ export default function RiskDashboard() {
   const [userFilter, setUserFilter] = useState(""); // 빈 값은 전체 사용자
   const filters = useMemo(() => ({ date: dateFilter, userId: userFilter }), [dateFilter, userFilter]);
   const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh, hasMore, capped, loadingMore, loadMore } = useEvents({ live, filters });
-  const { dates, users } = useScopeOptions(dateFilter, events.length);
+  const [scopeVersion, setScopeVersion] = useState(0); // 기록을 비운 뒤 날짜·사용자 목록을 다시 읽기 위한 번호
+  const { dates, users } = useScopeOptions(dateFilter, `${events.length}:${scopeVersion}`);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -1268,6 +1269,18 @@ export default function RiskDashboard() {
         .ov-dot:hover { outline: 2px solid var(--text); outline-offset: 1px; }
         .ov-dot--static { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; cursor: default; }
         .ov-keys { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
+        .clear-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 18px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: #C6362A; font-size: 12px; cursor: pointer; }
+        .clear-btn:hover { background: #FDF1F0; }
+        .clear-panel { margin-top: 2px; border: 1px solid #F1C9C5; background: #FFF8F7; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; min-width: 0; flex: 1 1 520px; }
+        .clear-panel__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .clear-panel__row label { display: inline-flex; align-items: center; gap: 4px; }
+        .clear-panel__row .ghost-btn { margin-left: auto; }
+        .clear-panel__confirm { width: 120px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; }
+        .clear-panel__go { padding: 6px 14px; border: none; border-radius: 6px; background: #C6362A; color: #fff; font-weight: 600; cursor: pointer; }
+        .clear-panel__go:disabled { background: #E5B5B0; cursor: not-allowed; }
+        .clear-panel__hint { color: var(--text-dim); font-size: 11.5px; }
+        .clear-panel__ok { color: #137D57; word-break: break-all; }
+        .clear-panel__err { color: #C6362A; }
         .window-card { margin-top: 18px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
         .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
         .window-card__phase { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
@@ -1401,7 +1414,15 @@ export default function RiskDashboard() {
 
       {!isMock && view === "overview" && (
         <RiskOverview key={dateFilter || dates[0]?.date || "none"} apiBase={API_BASE} dates={dates} date={dateFilter || dates[0]?.date || ""}
-          onDateChange={setDateFilter} version={lastOkAt?.getTime() ?? 0}
+          onDateChange={setDateFilter} version={`${lastOkAt?.getTime() ?? 0}:${scopeVersion}`}
+          onCleared={(result) => {
+            // 날짜 키가 바뀌면 개요 화면이 새로 그려져 패널 메시지가 사라지므로, 결과는 알림으로도 띄웁니다.
+            toastIdRef.current += 1;
+            const what = result.scope === "all" ? "전체 기록" : `${result.date}${result.user_id ? ` · ${result.user_id}` : ""} 기록`;
+            setToasts((prev) => [...prev, { id: toastIdRef.current, color: "#137D57",
+              text: `${what}을 지웠습니다.${result.backup ? ` 백업: ${result.backup}` : " (백업 없음)"}` }].slice(-4));
+            setDateFilter(""); setUserFilter(""); setSelectedId(null); setScopeVersion((v) => v + 1); refresh();
+          }}
           onOpenWindow={(w) => {
             setDateFilter(new Date(w.startedAtMs + 9 * 3600 * 1000).toISOString().slice(0, 10)); // KST 날짜
             setUserFilter(w.user);

@@ -3,6 +3,7 @@
 // 점이나 표의 칸을 누르면 그 사용자 구간의 상세 분석 화면으로 이동합니다. 점수는 서버 값만 씁니다.
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import ClearRecords from "./ClearRecords.jsx";
 import { LEVELS, levelText, eventLevel, fetchEventPage, formatScore, MAX_PAGES, PAGE_SIZE } from "../lib/events.js";
 import {
   COMPACT_SLOTS, MAX_SERIES, SERIES_COLORS, assignColors, buildMatrix, buildRows, defaultSelection, formatHm, rankUsers, timeTicks,
@@ -57,7 +58,7 @@ function OverviewTooltip({ active, payload, label, matrix, colors }) {
   );
 }
 
-export default function RiskOverview({ apiBase, dates, date, onDateChange, version, onOpenWindow }) {
+export default function RiskOverview({ apiBase, dates, date, onDateChange, version, onOpenWindow, onCleared }) {
   const { events, status, error } = useDayWindows(apiBase, date, version);
   const ranked = useMemo(() => rankUsers(events), [events]);
   // 사용자 → 색 칸. null이면 기본(가장 위험한 8명). 켜고 끌 때 남은 사용자의 색은 바뀌지 않습니다.
@@ -113,6 +114,7 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
             {dates.map((d) => <option key={d.date} value={d.date}>{d.date} · 사용자 {d.user_count}명 · 구간 {d.window_count}</option>)}
           </select>
         </label>
+        <ClearRecords apiBase={apiBase} date={date} onCleared={onCleared} />
         <div className="ov-legend" role="group" aria-label="표시할 사용자">
           {ranked.map(({ user, grade }) => {
             const on = user in colors;

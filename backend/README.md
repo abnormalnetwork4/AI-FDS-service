@@ -82,6 +82,18 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 .\.venv\Scripts\python.exe examples/event_demo.py
 ```
 
+### 기록 비우기 (`examples/clear_records.py`, 화면의 "기록 비우기")
+
+전체 기록, 또는 한 날짜(KST)·한 사용자의 구간과 그 구간에 속한 관측·분석 기록(세션, 이벤트, 프롬프트 결과, 네트워크 분석, 수신 기록)을 지웁니다. 지우기 전에 서버가 DB와 같은 폴더에 `<DB이름>-backup-<UTC시각>.sqlite3` 백업을 만듭니다(끌 수 있음). 되돌리려면 서버를 끄고 백업 파일 이름을 원래 DB 이름으로 바꾸면 됩니다. SQLite 파일 자체는 지우지 않고 행만 삭제하므로 서버를 켠 채로 실행할 수 있습니다. 날짜만 지우면, 다음 날 첫 1시간 구간은 지운 기록을 이력 피처로 썼을 수 있어 자동으로 다시 계산합니다.
+
+```powershell
+.\.venv\Scripts\python.exe examples\clear_records.py --all                         # 전체 (CLEAR 입력 후 진행)
+.\.venv\Scripts\python.exe examples\clear_records.py --date 2026-09-01             # 그날만
+.\.venv\Scripts\python.exe examples\clear_records.py --date 2026-09-01 --user user-04 --no-backup
+```
+
+API: `GET /api/v1/admin/clear/preview[?date=&user_id=]`(삭제 대상 수), `POST /api/v1/admin/clear` `{scope: "all"|"date", date?, user_id?, confirm: "CLEAR", backup: true}`. 인증이 없는 로컬 PoC 기능이라 실수 방지용 확인 문구만 있습니다. 여러 사람이 접속하는 환경에서는 서버를 `FDS_ALLOW_CLEAR=0`으로 실행해 끄세요(403).
+
 ### 한 달 치 근무 기록 (`examples/month_demo.py`)
 
 가상 사용자 30명(`user-01`~`user-30`)이 평일 09:00~17:00(점심 12~13시 제외)에 AI를 사용한 기록을 만듭니다. 사용자마다 성향을 주고, 날마다 무작위로 활동 시간대(하루 5~20개 구간)와 사건을 배치합니다. 사건 패턴은 아래 `video_demo.py`의 검증된 패턴을 그대로 씁니다. 같은 `--seed`면 항상 같은 계획입니다.
@@ -161,6 +173,7 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 | GET | `/api/v1/risk-windows`, `/api/v1/risk-windows/{window_id}` | 사용자·단말 5분 통합 결과(`user_id`, `date` 필터). `prompt_scores`와 `network_score_breakdown` 포함 |
 | GET | `/api/v1/dashboard/risk-windows` | 화면용 사용자 구간 목록. `user_id`, `date`(KST 날짜), `start`(같은 시간대) 필터 |
 | GET | `/api/v1/dashboard/users?date=` | 사용자별 요약: 구간 수, 등급별 구간 수, 가장 높은 등급 구간(점수 합산 아님). 높은 등급 순 |
+| GET / POST | `/api/v1/admin/clear/preview`, `/api/v1/admin/clear` | 기록 비우기 미리 보기 / 실행(전체·날짜·사용자, 기본 백업, 확인 문구 CLEAR, `FDS_ALLOW_CLEAR=0`이면 403) |
 | GET | `/api/v1/dashboard/dates` | 구간이 있는 KST 날짜 목록과 날짜별 구간·사용자 수 |
 | GET | `/api/v1/dashboard/company-slots?date=` | 회사 시간대 요약: 사용자 수, 등급별 구간 수, 미판정·오류 수, 최고 등급 구간. 회사 점수를 합산·평균하지 않음 |
 | GET | `/api/v1/company-windows`, `/api/v1/company-windows/{id}` | (이전 버전, 읽기 전용) 보존된 회사 전체 합산 구간 |

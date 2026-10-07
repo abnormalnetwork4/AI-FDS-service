@@ -1,8 +1,10 @@
 # FDS의 HTTP 진입점과 조회 주소를 모은 파일입니다. @router.post/get이 URL과 파이썬 함수를 연결합니다.
+import os
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field, model_validator
 from fastapi.responses import StreamingResponse
 
 from . import services, dashboard
@@ -204,3 +206,51 @@ def get_assessment(event_id: str, repo: Repo):
     if result is None:
         raise HTTPException(404, "Assessment not found")
     return result
+
+
+# ---------------------------------------------------------------- 기록 비우기 (로컬 시연·개발용)
+# 인증이 없는 PoC이므로 실수 방지를 위해 확인 문구가 필요합니다. 공용 배포에서는 FDS_ALLOW_CLEAR=0으로 끄세요.
+CLEAR_CONFIRM = "CLEAR"
+
+
+def clear_enabled():
+    return os.getenv("FDS_ALLOW_CLEAR", "1") not in ("0", "false", "False", "no")
+
+
+KstDate = date  # 아래 모델의 필드 이름 date가 타입 이름을 가리지 않도록 별칭을 씁니다.
+
+
+class ClearRequest(BaseModel):
+    scope: Literal["all", "date"]
+    date: KstDate | None = None       # scope=date일 때 KST 날짜
+    user_id: str | None = Field(default=None, min_length=1, max_length=128)  # 선택: 그 날짜의 한 사용자만
+    confirm: str                      # 실수 방지: "CLEAR"
+    backup: bool = True               # 지우기 전에 DB 백업 파일 생성
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.confirm != CLEAR_CONFIRM:
+            raise ValueError(f'confirm must be "{CLEAR_CONFIRM}"')
+        if self.scope == "date" and self.date is None:
+            raise ValueError("scope=date requires date")
+        if self.scope == "all" and (self.date is not None or self.user_id is not None):
+            raise ValueError("scope=all does not take date or user_id")
+        return self
+
+
+@router.get("/admin/clear/preview", tags=["관리"])
+def clear_preview(repo: Repo, date: date | None = None, user_id: str | None = None):
+    # 지울 대상 수만 보여 줍니다. 아무것도 지우지 않습니다.
+    if not clear_enabled():
+        raise HTTPException(403, "Clearing records is disabled (FDS_ALLOW_CLEAR=0)")
+    return dict(enabled=True, date=date.isoformat() if date else None, user_id=user_id,
+                **repo.clear_counts(date, user_id))
+
+
+@router.post("/admin/clear", tags=["관리"])
+def clear_records(body: ClearRequest, repo: Repo):
+    if not clear_enabled():
+        raise HTTPException(403, "Clearing records is disabled (FDS_ALLOW_CLEAR=0)")
+    if body.scope == "all":
+        return repo.clear_all(backup=body.backup)
+    return repo.clear_day(body.date, body.user_id, backup=body.backup)
