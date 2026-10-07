@@ -1,13 +1,11 @@
 """Out-of-path FDS: 관측 자료 저장 → 행동 집계 → 사후 분석. 원본 통신을 호출하거나 차단하지 않습니다."""
 import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import timedelta
 
 from .contracts import Assessment, CaptureIngest, CaptureRecord
 from .repository import Repository
-from .schemas import OPTIONAL_EVENT_FIELDS, DataRiskRequest, Finding, RiskResult, WindowRequest
-from .services import compute_window
+from .schemas import OPTIONAL_EVENT_FIELDS, DataRiskRequest, Finding, RiskResult
+from .company import refresh_company
 
 
 def analyze_safely(engine, value, user_id, engine_name, event_id, window_id=None):
@@ -69,23 +67,10 @@ def ingest(repo: Repository, body: CaptureIngest, data_engine, network_engine):
     # 모델 실행보다 먼저 관측 자료를 확정합니다. 분석 중 들어온 다음 수집도 이 기록을 집계할 수 있습니다.
     # 같은 ID·내용은 재전송으로 처리하며, 앞선 처리 중 중단됐다면 같은 자료로 분석을 다시 시도합니다.
     existing = repo.record_capture(fingerprint, capture, initial, session, body.ai_event)
-    if existing["processing_state"] == "finished":
-        return existing
-
-    sessions, events = repo.observation_snapshot(session.user_id)
-    # 이벤트 발생 시점(기존 캡처는 종료 시점)에서 최근 5분/1시간을 즉시 집계합니다.
-    # 이벤트는 발생 시각, 기존 완료 세션은 시작 시각에 귀속하며 구간이 찰 때까지 기다리지 않습니다.
-    end = session.ended_at + timedelta(microseconds=1)
-    windows = [compute_window(WindowRequest(user_id=session.user_id, device_id=session.device_id,
-                                            start=end - timedelta(minutes=minutes), duration_minutes=minutes),
-                              sessions, events) for minutes in (5, 60)]
-    # Data와 두 Network 구간을 각각 실행하고 먼저 끝난 결과부터 저장·화면에 공개합니다.
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        jobs = {pool.submit(data_analysis, body, data_engine, availability): ("data", None)}
-        for window in windows:
-            job = pool.submit(analyze_safely, network_engine, window, session.user_id, "network", body.id, window.id)
-            jobs[job] = (f"network-{window.duration_minutes:02}", window)
-        for job in as_completed(jobs):
-            slot, window = jobs[job]
-            repo.publish_result(body.id, slot, job.result(), window)
+    if existing["processing_state"] != "finished":
+        result = data_analysis(body, data_engine, availability)
+        repo.publish_result(body.id, "data", result)
+    # 재전송에서도 중단됐던 회사 분석은 재개합니다. 같은 입력 버전은 다시 저장하지 않습니다.
+    if existing.get("company_window_id"):
+        refresh_company(repo, existing["company_window_id"], network_engine)
     return repo.get("passive_assessment", body.id)

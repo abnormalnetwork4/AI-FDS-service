@@ -1,7 +1,7 @@
 """트래픽 경로 밖에서 수집한 관측 자료와 분석 결과의 계약."""
 from typing import Literal
 import hashlib
-from pydantic import AwareDatetime, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, field_validator, model_validator
 from .schemas import AIUsageEvent, Count, Identifier, Model, NetworkSession, RiskResult
 
 
@@ -104,9 +104,53 @@ class Assessment(Model):
     id: Identifier
     user_id: Identifier
     session_id: Identifier
+    scoring_scope: Literal["legacy_event", "prompt_only"] = "legacy_event"
+    company_window_id: str | None = None
     processing_state: Literal["processing", "finished"] = "processing"
     status: Literal["pending", "complete", "error"] = "pending"
-    fusion_status: Literal["pending"] = "pending"
-    final_grade: Literal["unassessed"] = "unassessed"
-    reason: str = "사후 분석 결과입니다. 통합 등급 정책은 미연결이며 통신 허용·차단을 수행하지 않습니다."
+    fusion_status: Literal["pending", "complete", "error"] = "pending"
+    final_grade: Literal["normal", "caution", "warning", "danger"] | None = None
+    score: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    confidence: None = None
+    override: bool = False
+    override_reasons: list[str] = Field(default_factory=list)
+    scoring_policy: str | None = None
+    reason: str = "분석 결과를 기다리는 중입니다. 통합 등급은 미판정입니다."
+    results: list[RiskResult] = Field(default_factory=list)
+
+    @field_validator("final_grade", mode="before")
+    @classmethod
+    def legacy_unassessed(cls, value):
+        return None if value == "unassessed" else value
+
+
+class CompanyAssessment(Model):
+    """한 배포 = 한 회사. 사용자별 등급이 아닌 고정 5분 구간의 전체 위험도."""
+    id: str
+    user_id: Identifier = "company"
+    scope: Literal["company"] = "company"
+    start: AwareDatetime
+    end: AwareDatetime
+    duration_minutes: Literal[5] = 5
+    phase: Literal["open", "closed"] = "open"
+    revision: int = 0
+    network_revision: int = -1
+    capture_count: int = 0
+    prompt_complete_count: int = 0
+    prompt_missing_count: int = 0
+    prompt_error_count: int = 0
+    prompt_max_score: float | None = None
+    prompt_source_capture_id: str | None = None
+    prompt_source_user_id: str | None = None
+    network_score: float | None = None
+    network_contribution: float | None = None
+    status: Literal["pending", "complete", "error"] = "pending"
+    fusion_status: Literal["pending", "complete", "error"] = "pending"
+    final_grade: Literal["normal", "caution", "warning", "danger"] | None = None
+    score: float | None = None
+    confidence: None = None
+    override: bool = False
+    override_reasons: list[str] = Field(default_factory=list)
+    scoring_policy: str = "company5m-promptmax60-network40-v2"
+    reason: str = "5분 구간 분석 대기"
     results: list[RiskResult] = Field(default_factory=list)

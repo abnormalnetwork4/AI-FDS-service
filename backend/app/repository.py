@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .schemas import AIUsageEvent, NetworkSession
+from .scoring import fuse_parts
+from .company_repository import CompanyRepository
 
 
 class ConflictError(Exception):
@@ -16,7 +18,7 @@ class ReferenceError(Exception):
     pass
 
 
-class Repository:
+class Repository(CompanyRepository):
     def __init__(self, path: Path):
         self.path = path
 
@@ -48,12 +50,15 @@ class Repository:
             conn.execute("CREATE TABLE IF NOT EXISTS dashboard_revision (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
             conn.execute("INSERT OR IGNORE INTO dashboard_revision VALUES (1, 0)")
             for action in ("INSERT", "UPDATE"):
+                conn.execute(f"DROP TRIGGER IF EXISTS dashboard_{action.lower()}")
                 conn.execute(f"""CREATE TRIGGER IF NOT EXISTS dashboard_{action.lower()}
-                    AFTER {action} ON records WHEN NEW.kind = 'passive_assessment'
+                    AFTER {action} ON records WHEN NEW.kind IN ('passive_assessment', 'company_assessment')
                     BEGIN UPDATE dashboard_revision SET value = value + 1 WHERE id = 1; END""")
             conn.execute("""CREATE TABLE IF NOT EXISTS analysis_parts (
                 capture_id TEXT NOT NULL, slot TEXT NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY(capture_id, slot))""")
+            conn.execute("CREATE TABLE IF NOT EXISTS company_members (capture_id TEXT PRIMARY KEY, window_id TEXT NOT NULL)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_company_members_window ON company_members(window_id)")
             conn.commit()
 
     def save(self, kind, record):
@@ -158,15 +163,24 @@ class Repository:
                 for kind, record in records:
                     conn.execute("INSERT INTO records VALUES (?, ?, ?, ?)",
                                  (kind, record.id, record.user_id, record.model_dump_json()))
-                parts = conn.execute("SELECT payload FROM analysis_parts WHERE capture_id = ? ORDER BY slot",
+                parts = conn.execute("SELECT slot, payload FROM analysis_parts WHERE capture_id = ? ORDER BY slot",
                                      (capture_id,)).fetchall()
                 results = [json.loads(part["payload"]) for part in parts]
-                complete = len(results) == 3
-                statuses = {r["status"] for r in results}
-                assessment.update(results=results, processing_state="finished" if complete else "processing",
-                    status="error" if "error" in statuses else "complete" if complete and statuses == {"complete"} else "pending")
+                company_mode = assessment.get("scoring_scope") == "prompt_only"
+                if company_mode:
+                    results = [r for r in results if r["engine"] == "data"]
+                complete = slot == "data" if company_mode else len(results) == 3
+                assessment.update(results=results, processing_state="finished" if complete else "processing")
+                # ingest의 각 부분 결과를 저장할 때 통합 상태도 같은 트랜잭션으로 확정합니다.
+                # INSERT/UPDATE 트리거가 revision을 올려 SSE changed를 보냅니다.
+                if company_mode:
+                    assessment["status"] = result.status
+                else:
+                    assessment.update(fuse_parts({part["slot"]: json.loads(part["payload"]) for part in parts}))
                 conn.execute("UPDATE records SET payload = ? WHERE kind = 'passive_assessment' AND id = ?",
                              (json.dumps(assessment, ensure_ascii=False), capture_id))
+                if company_mode:
+                    self._refresh_company_fusion(conn, assessment["company_window_id"])
         return assessment
 
     def record_capture(self, fingerprint, capture, assessment, session, event):
@@ -193,9 +207,11 @@ class Repository:
                                  (kind, record.id, record.user_id, record.model_dump_json()))
                 conn.execute("INSERT INTO records VALUES ('passive_receipt', ?, ?, ?)",
                              (capture.id, capture.user_id, json.dumps({"fingerprint": fingerprint})))
+                raw_assessment = assessment.model_dump(mode="json")
+                self._attach_company(conn, raw_assessment, session, event)
             except sqlite3.IntegrityError as exc:
                 raise ConflictError("A linked record ID already exists") from exc
-        return assessment.model_dump(mode="json")
+        return raw_assessment
 
     def finish_capture(self, assessment, records):
         # 같은 캡처의 동시 재전송이 중복 분석됐더라도 결과는 먼저 완료한 한 번만 저장합니다.

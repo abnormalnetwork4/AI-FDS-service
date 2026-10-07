@@ -135,6 +135,7 @@ class NetworkModelFeatures(Model):
 class BehaviorWindow(Model):
     # 특정 시점에 계산해 저장한 행동 통계입니다. 뒤늦게 들어온 기록으로 자동 갱신되지는 않습니다.
     id: str
+    scope: Literal["user_device", "company"] = "user_device"
     user_id: Identifier
     device_id: Identifier
     start: AwareDatetime
@@ -171,19 +172,25 @@ class Finding(Model):
     detected: bool | None = Field(default=None, strict=True)
     probability: Probability | None = None
     threshold: Annotated[float, Field(gt=0, lt=1, allow_inf_nan=False)] | None = None
+    detection_method: Literal["threshold", "argmax"] | None = None
     reason: str
 
     @model_validator(mode="after")
     def score_matches_status(self):
-        has_classification = any(v is not None for v in (self.detected, self.probability, self.threshold))
+        has_classification = any(v is not None for v in (self.detected, self.probability, self.threshold, self.detection_method))
         if self.status != "complete" and (self.score is not None or has_classification):
             raise ValueError("Unfinished findings cannot carry scores or classifications")
         if self.status == "complete" and self.score is None and not has_classification:
             raise ValueError("Complete findings require a score or classification")
         if has_classification:
-            if any(v is None for v in (self.detected, self.probability, self.threshold)):
-                raise ValueError("Classification requires detected, probability and threshold")
-            if self.detected != (self.probability > self.threshold):
+            if self.detected is None or self.probability is None:
+                raise ValueError("Classification requires detected and probability")
+            if self.detection_method == "argmax":
+                if self.threshold is not None:
+                    raise ValueError("Argmax classification does not use a probability threshold")
+            elif self.threshold is None:
+                raise ValueError("Threshold classification requires a threshold")
+            elif self.detected != (self.probability > self.threshold):
                 raise ValueError("Classification must match its probability threshold")
         return self
 
@@ -198,6 +205,8 @@ class RiskResult(Model):
     source_event_id: str | None = None
     status: Literal["pending", "complete", "error"]
     score: Score | None = None
+    score_max: Literal[60, 100] = 100
+    scoring_policy: str | None = None
     input_origin: Literal["direct_user", "external_document", "tool_output"] | None = None
     findings: list[Finding]
     created_at: AwareDatetime = Field(default_factory=now)
@@ -207,6 +216,8 @@ class RiskResult(Model):
         # 미완료 분석에 숫자 점수를 붙이거나 일부 항목이 미완료인데 전체 완료로 표시하는 것을 막습니다.
         if self.status != "complete" and self.score is not None:
             raise ValueError("Unfinished results cannot have a score")
+        if self.score is not None and self.score > self.score_max:
+            raise ValueError("Risk score exceeds its declared scale")
         if self.status == "complete" and (not self.findings or any(f.status != "complete" for f in self.findings)):
             raise ValueError("Complete results require complete findings")
         return self
@@ -219,4 +230,7 @@ class DashboardSummary(Model):
     analysis_count: int
     pending_analysis_count: int
     scored_analysis_count: int
+    graded_event_count: int = 0
+    company_window_count: int = 0
+    graded_window_count: int = 0
     average_risk_score: Score | None

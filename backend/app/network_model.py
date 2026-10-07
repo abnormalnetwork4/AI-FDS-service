@@ -75,6 +75,7 @@ class XGBoostNetworkRiskEngine:
         by_code = {code: proba.get(code, 0.0) for code in NETWORK_CATEGORIES}
         by_code["N6"] = proba.get("N5+N6", 0.0)
         items = [Finding(code=code, name=name, status="complete", score=round(100 * by_code[code], 1),
+                         detected=(code == threat), probability=float(by_code[code]), detection_method="argmax",
                          reason=f"모델 확률 {by_code[code]:.1%}" + (" · 판정 위협" if code == threat else "")
                                 + (" (N5+N6 동시 클래스)" if code == "N6" else ""))
                  for code, name in NETWORK_CATEGORIES.items()]

@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from . import services, dashboard
 from .collection import analyze_safely, ingest
-from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest
+from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest, CompanyAssessment
 from .live import changes
 from .repository import Repository
 from .schemas import AIUsageEvent, BehaviorWindow, DashboardSummary, DataRiskRequest, NetworkSession, RiskResult, WindowRequest
@@ -99,12 +99,38 @@ def dashboard_events(repo: Repo, user_id: str | None = None, limit: Limit = 50, 
 
 
 @router.get("/dashboard/explanation", response_model=dashboard.Explanation, tags=["대시보드"])
-def dashboard_explanation(repo: Repo, capture_id: str):
+def dashboard_explanation(repo: Repo, capture_id: str | None = None, window_id: str | None = None):
+    if window_id is not None:
+        raw = repo.get("company_assessment", window_id)
+        if raw is None:
+            raise HTTPException(404, "Company window not found")
+        return dashboard.explain_company(raw)
+    if capture_id is None:
+        raise HTTPException(422, "Provide window_id or capture_id")
     # 브라우저가 만든 근거가 아니라 저장된 분석 결과만 요약합니다.
     raw = repo.get("passive_assessment", capture_id)
     if raw is None:
         raise HTTPException(404, "Assessment not found")
     return dashboard.explain(raw)
+
+
+@router.get("/dashboard/company-windows", response_model=dashboard.DashboardPage, tags=["대시보드"])
+def company_dashboard(repo: Repo, limit: Limit = 50, offset: Offset = 0):
+    rows, total = repo.company_page(limit, offset)
+    return dashboard.DashboardPage(events=[dashboard.present_company(row) for row in rows], total=total, limit=limit, offset=offset)
+
+
+@router.get("/company-windows", response_model=list[CompanyAssessment], tags=["회사 5분 통합"])
+def company_windows(repo: Repo, limit: Limit = 50, offset: Offset = 0):
+    return repo.company_page(limit, offset)[0]
+
+
+@router.get("/company-windows/{window_id}", response_model=CompanyAssessment, tags=["회사 5분 통합"])
+def company_window(window_id: str, repo: Repo):
+    raw = repo.get("company_assessment", window_id)
+    if raw is None:
+        raise HTTPException(404, "Company window not found")
+    return raw
 
 
 @router.get("/dashboard/stream", tags=["대시보드"])

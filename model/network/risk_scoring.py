@@ -109,7 +109,8 @@ def integrate(prompt_score, network_contribution):
     """
     prompt_score = float(np.clip(prompt_score, 0, PROMPT_MAX))
     network_contribution = float(np.clip(network_contribution, 0, NETWORK_MAX * INTEGRATION_WEIGHT))
-    total = prompt_score + network_contribution
+    # 표시 점수와 등급 경계가 어긋나지 않게 합계를 먼저 반올림합니다.
+    total = round(prompt_score + network_contribution, 1)
     reasons = []
     if prompt_score >= PROMPT_OVERRIDE:
         reasons.append(f'프롬프트 점수 {prompt_score:.1f}/{PROMPT_MAX} ≥ {PROMPT_OVERRIDE}')

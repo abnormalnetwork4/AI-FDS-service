@@ -12,16 +12,14 @@ export const LEVELS = {
   not_detected: { label: '미탐지', color: '#33429A', rank: 0 },
 };
 
-// 개별 엔진이 '탐지'로 본 항목인지 판단합니다(통합 등급과 무관). Data는 detected, Network는 항목 점수(모델 확률) 50% 이상이거나
-// 서버 문구에 '판정 위협/위험'이 있을 때입니다. 백엔드가 Network 항목에도 detected를 주면 이 문구 검사는 지워도 됩니다.
-const NETWORK_HIT = /판정\s*위[협험]/;
+// 실제 항목의 탐지 여부는 서버의 detected만 사용합니다. 과거 데이터에 없으면 추측하지 않습니다.
 // network_score(종합 점수)·network_model(모델 상태)은 개별 탐지 항목이 아니라 네트워크 엔진의 요약 행입니다.
 const SUMMARY_CODES = ['network_score', 'network_model'];
 export const isSummaryItem = (item) => SUMMARY_CODES.includes(item.code);
 export function isNotable(item) {
   if (isSummaryItem(item)) return false;
   if (['detected', 'danger', 'warning', 'caution'].includes(item.status)) return true;
-  return item.status === 'complete' && ((item.score ?? 0) >= 50 || NETWORK_HIT.test(item.detail ?? ''));
+  return item.status === 'complete' && item.detected === true;
 }
 // 화면 표시용 상태. 탐지로 본 Network 항목은 '분석 완료'가 아니라 '탐지'로 보여 줍니다.
 export const viewStatus = (item) => item.status === 'complete' && isNotable(item) ? 'detected' : item.status;
@@ -78,25 +76,27 @@ const dateMs = (value) => value && Number.isFinite(Date.parse(value)) ? Date.par
 export function normalizeEvent(raw) {
   const startedAtMs = dateMs(raw.started_at);
   const item = (x) => {
+    const validProbability = typeof x.probability === 'number' && Number.isFinite(x.probability)
+      && x.probability >= 0 && x.probability <= 1;
     const classified = x.status === 'complete' && typeof x.detected === 'boolean'
-      && typeof x.probability === 'number' && Number.isFinite(x.probability)
-      && x.probability >= 0 && x.probability <= 1
-      && typeof x.threshold === 'number' && x.threshold > 0 && x.threshold < 1
-      && x.detected === (x.probability > x.threshold);
+      && validProbability
+      && (x.detection_method === 'argmax' ? x.threshold == null
+        : typeof x.threshold === 'number' && x.threshold > 0 && x.threshold < 1
+          && x.detected === (x.probability > x.threshold));
     return {
     ...x, label: x.label ?? x.code, detail: x.detail ?? '',
     status: classified ? (x.detected ? 'detected' : 'not_detected')
       : ['pending', 'complete', 'error'].includes(x.status) ? x.status : 'pending',
     detected: classified ? x.detected : null,
-    probability: classified ? x.probability : null,
-    threshold: classified ? x.threshold : null,
+    probability: classified && validProbability ? x.probability : null,
+    threshold: classified ? x.threshold ?? null : null,
     score: x.status === 'complete' ? nullableScore(x.score) : null,
-    weight: null,
     };
   };
   return {
     ...raw, isReal: true, id: String(raw.id), sessionId: raw.session_id,
-    user: raw.user ?? '-', dept: raw.device_id ?? '-',
+    user: raw.scope === 'company' ? '회사 전체' : raw.user ?? '-',
+    dept: raw.scope === 'company' ? `5분 구간 · ${raw.capture_count ?? 0}건` : raw.device_id ?? '-',
     startedAtMs, endedAtMs: dateMs(raw.ended_at),
     connectedAt: startedAtMs === null ? '--' : new Date(startedAtMs).toLocaleString('ko-KR', { hour12: false }),
     grade: normalizeGrade(raw.grade ?? raw.final_grade),
@@ -116,7 +116,7 @@ export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1) {
   const count = Math.max(1, Math.min(MAX_PAGES, Math.trunc(pages) || 1));
   const one = async (index) => {
     const offset = index ? `&offset=${index * PAGE_SIZE}` : '';
-    const response = await fetcher(`${base}/api/v1/dashboard/events?limit=${PAGE_SIZE}${offset}`, { signal });
+    const response = await fetcher(`${base}/api/v1/dashboard/company-windows?limit=${PAGE_SIZE}${offset}`, { signal });
     if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
     const page = await response.json();
     if (!Array.isArray(page.events) || !Number.isInteger(page.total)) throw new Error('올바르지 않은 대시보드 응답');
