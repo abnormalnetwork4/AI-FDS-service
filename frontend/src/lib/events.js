@@ -1,9 +1,11 @@
 // 통합 점수·신뢰도·등급은 백엔드가 계산해서 내려주는 값만 표시합니다(없으면 null). 없는 숫자를 0으로 바꾸지 않습니다.
+// color는 선·점·막대·테두리용, text는 흰 바탕 글자용입니다(없으면 color와 같음).
 // 통합 등급은 정상/주의/경고/위험 4단계입니다. 기준은 model/network/risk_scoring.py의 GRADE_BOUNDS(30, 50, 70)와 같습니다.
 export const LEVELS = {
   danger: { label: '위험', color: '#C6362A', rank: 3 },
   warning: { label: '경고', color: '#C2570C', rank: 2 },
-  caution: { label: '주의', color: '#8A6D00', rank: 1 },
+  // 주의: 그래프·막대·테두리는 밝은 노란색, 흰 바탕 글자는 읽히도록 조금 진한 노란색(text, 대비 3.3:1, 굵게 사용)
+  caution: { label: '주의', color: '#EAB308', text: '#B58500', rank: 1 },
   normal: { label: '정상', color: '#137D57', rank: 0 },
   pending: { label: '미판정', color: '#737987', rank: -1 },
   error: { label: '분석 오류', color: '#6B4FA3', rank: 4 },
@@ -238,3 +240,6 @@ export async function fetchSameSlot(base, windowStart, signal, fetcher = fetch) 
   const page = await response.json();
   return Array.isArray(page?.events) ? page.events.map(normalizeEvent) : [];
 }
+
+// 흰 바탕 위 글자색. 주의(노란색)처럼 그래픽 색이 너무 밝은 등급은 별도 text 색을 씁니다.
+export const levelText = (key) => LEVELS[key]?.text ?? LEVELS[key]?.color;

@@ -3,9 +3,9 @@
 // 점이나 표의 칸을 누르면 그 사용자 구간의 상세 분석 화면으로 이동합니다. 점수는 서버 값만 씁니다.
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { LEVELS, eventLevel, fetchEventPage, formatScore, MAX_PAGES, PAGE_SIZE } from "../lib/events.js";
+import { LEVELS, levelText, eventLevel, fetchEventPage, formatScore, MAX_PAGES, PAGE_SIZE } from "../lib/events.js";
 import {
-  MAX_SERIES, SERIES_COLORS, assignColors, buildMatrix, buildRows, defaultSelection, formatHm, rankUsers, timeTicks,
+  COMPACT_SLOTS, MAX_SERIES, SERIES_COLORS, assignColors, buildMatrix, buildRows, defaultSelection, formatHm, rankUsers, timeTicks,
 } from "../lib/overview.js";
 
 const BANDS = [
@@ -48,7 +48,7 @@ function OverviewTooltip({ active, payload, label, matrix, colors }) {
             <span className="ov-swatch" style={{ background: SERIES_COLORS[colors[user]] }} />
             <span className="ov-tip__user">{user}</span>
             <span className="ov-tip__score">{formatScore(w.score)}</span>
-            <span style={{ color: LEVELS[level].color, fontWeight: 600 }}>{LEVELS[level].label}{w.override ? " · 강제" : ""}</span>
+            <span style={{ color: levelText(level), fontWeight: 600 }}>{LEVELS[level].label}{w.override ? " · 강제" : ""}</span>
           </div>
         );
       })}
@@ -72,9 +72,10 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
   const shown = useMemo(() => Object.keys(colors).sort(), [colors]);
 
   const matrix = useMemo(() => buildMatrix(events), [events]);
-  const rows = useMemo(() => buildRows(events, shown), [events, shown]);
+  const { rows, segments } = useMemo(() => buildRows(events, shown), [events, shown]);
   const ticks = timeTicks(matrix.times);
   const pending = events.filter((e) => e.score == null).length;
+  const compact = matrix.times.length > COMPACT_SLOTS;
 
   const toggle = (user) => {
     if (user in colors) {
@@ -89,9 +90,9 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
     setPicked({ ...colors, [user]: slot }); setHint("");
   };
 
-  const dot = (user) => function Dot(props) {
+  const dot = (user, key) => function Dot(props) {
     const { cx, cy, payload } = props;
-    if (cx == null || cy == null || payload?.[user] == null) return null;
+    if (cx == null || cy == null || payload?.[key] == null) return null;
     const w = matrix.cell(user, payload.t);
     const ring = w?.override;
     return (
@@ -120,7 +121,7 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
                 title={on ? "누르면 선을 숨깁니다" : "누르면 선을 그립니다"}>
                 <span className="ov-swatch" style={{ background: on ? SERIES_COLORS[colors[user]] : "transparent" }} />
                 {user}
-                <span className="ov-chip__grade" style={{ color: grade ? LEVELS[grade].color : LEVELS.pending.color }}>
+                <span className="ov-chip__grade" style={{ color: grade ? levelText(grade) : LEVELS.pending.color }}>
                   {grade ? LEVELS[grade].label : "미판정"}
                 </span>
               </button>
@@ -142,37 +143,47 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
             <ResponsiveContainer width="100%" height={380}>
               <LineChart data={rows} margin={{ top: 12, right: 88, bottom: 8, left: 0 }}>
                 {BANDS.map((b) => (
-                  <ReferenceArea key={b.key} y1={b.y1} y2={b.y2} fill={LEVELS[b.key].color} fillOpacity={0.07} stroke="none"
+                  <ReferenceArea key={b.key} y1={b.y1} y2={b.y2} fill={LEVELS[b.key].color} fillOpacity={b.key === "caution" ? 0.12 : 0.07} stroke="none"
                     ifOverflow="hidden"
                     label={{ value: `${LEVELS[b.key].label} ${b.y1}~${b.y2 === 100 ? 100 : b.y2 - 1}`, position: "right",
-                      fill: LEVELS[b.key].color, fontSize: 11, fontWeight: 600 }} />
+                      fill: levelText(b.key), fontSize: 11, fontWeight: 600 }} />
                 ))}
                 <CartesianGrid vertical={false} stroke="#e1e0d9" strokeDasharray="0" />
-                <XAxis dataKey="t" type="number" scale="time" domain={[ticks[0] - 60000, ticks[ticks.length - 1] + 60000]}
+                <XAxis dataKey="t" type="number" scale="time" domain={[matrix.times[0] - 60000, matrix.times[matrix.times.length - 1] + 60000]}
                   ticks={ticks} tickFormatter={formatHm} tick={{ fontSize: 11, fill: "#898781" }} stroke="#c3c2b7" />
                 <YAxis domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} tick={{ fontSize: 11, fill: "#898781" }} stroke="#c3c2b7" width={36} />
                 <Tooltip content={<OverviewTooltip matrix={matrix} colors={colors} />} cursor={{ stroke: "#898781", strokeDasharray: "3 3" }} />
-                {shown.filter((u) => u in colors).map((user) => (
-                  <Line key={user} dataKey={user} name={user} type="linear" stroke={SERIES_COLORS[colors[user]]} strokeWidth={2}
-                    connectNulls={false} isAnimationActive={false} dot={dot(user)} activeDot={false} />
-                ))}
+                {shown.filter((u) => u in colors).flatMap((user) => segments[user].map((key) => (
+                  <Line key={key} dataKey={key} name={user} type="linear" stroke={SERIES_COLORS[colors[user]]} strokeWidth={2}
+                    connectNulls isAnimationActive={false} dot={dot(user, key)} activeDot={false} />
+                )))}
               </LineChart>
             </ResponsiveContainer>
           </div>
         )}
-        {pending > 0 && <div className="ov-note">미판정 구간 {pending}개는 점수가 없어 선에 표시하지 않습니다(0점으로 그리지 않음). 아래 표에서 확인할 수 있습니다.</div>}
+        <div className="ov-note">선은 한 사용자의 활동 구간을 시간 순서로 이은 것입니다(활동이 없던 시간은 건너뛰고, 30분 넘게 비면 끊음).
+          {pending > 0 && ` 미판정 구간 ${pending}개는 점수가 없어 점을 찍지 않습니다(0점으로 그리지 않음). 아래 표에서 확인할 수 있습니다.`}</div>
       </div>
 
       {events.length > 0 && (
         <div className="ov-card">
           <div className="ov-card__head">
             <b>사용자 × 시간대 표</b>
-            <span>칸을 누르면 상세 분석 · 위험한 사용자 순</span>
+            <span>칸을 누르면 상세 분석 · 위험한 사용자 순{compact ? " · 칸 색 = 등급(마우스를 올리면 점수)" : ""}</span>
+            {compact && (
+              <span className="ov-keys">
+                {["normal", "caution", "warning", "danger", "pending"].map((g) => (
+                  <span key={g}><i className="ov-dot ov-dot--static" style={{ background: LEVELS[g].color }} />{LEVELS[g].label}</span>
+                ))}
+              </span>
+            )}
           </div>
           <div className="ov-table-wrap">
             <table className="ov-table">
               <thead>
-                <tr><th>사용자</th>{matrix.times.map((t) => <th key={t}>{formatHm(t)}</th>)}</tr>
+                <tr><th>사용자</th>{matrix.times.map((t) => (
+                  <th key={t} className={compact ? "ov-th--compact" : ""}>{compact ? (new Date(t).getMinutes() % 30 === 0 ? formatHm(t) : "") : formatHm(t)}</th>
+                ))}</tr>
               </thead>
               <tbody>
                 {ranked.map(({ user }) => (
@@ -185,12 +196,22 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
                     </th>
                     {matrix.times.map((t) => {
                       const w = matrix.cell(user, t);
-                      if (!w) return <td key={t} className="ov-cell--empty">·</td>;
+                      if (!w) return <td key={t} className="ov-cell--empty">{compact ? "" : "·"}</td>;
                       const level = eventLevel(w);
+                      if (compact) {
+                        return (
+                          <td key={t} className="ov-td--compact">
+                            <button className={`ov-dot ov-dot--${level}`} onClick={() => onOpenWindow(w)}
+                              style={{ background: LEVELS[level].color }}
+                              title={`${user} · ${w.device_id} · ${formatHm(t)} · ${LEVELS[level].label} ${formatScore(w.score)}`}
+                              aria-label={`${user} ${formatHm(t)} ${LEVELS[level].label} ${formatScore(w.score)}점`} />
+                          </td>
+                        );
+                      }
                       return (
                         <td key={t}>
                           <button className="ov-cell" onClick={() => onOpenWindow(w)}
-                            style={{ color: LEVELS[level].color, borderColor: LEVELS[level].color }}
+                            style={{ color: levelText(level), borderColor: LEVELS[level].color, background: level === "caution" ? "#FEF9C3" : undefined }}
                             title={`${user} · ${w.device_id} · ${formatHm(t)}`}>
                             <b>{LEVELS[level].label}</b> {formatScore(w.score)}
                           </button>

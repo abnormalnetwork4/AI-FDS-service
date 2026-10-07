@@ -45,7 +45,7 @@ def refresh_window(repo, window_id, engine):
 
 
 def refresh_dirty(repo, engine):
-    for group in repo.list("risk_window"):
-        if group["revision"] != group["network_revision"]:
-            refresh_window(repo, group["id"], engine)
+    # 서버가 1초마다 부르는 백그라운드 작업입니다. 재계산이 필요한 구간 ID만 읽습니다.
+    for window_id in repo.dirty_window_ids():
+        refresh_window(repo, window_id, engine)
     repo.close_risk_windows()

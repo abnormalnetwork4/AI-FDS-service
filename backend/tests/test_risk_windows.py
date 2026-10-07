@@ -290,3 +290,24 @@ def test_kst_date_and_user_filters(tmp_path):
         assert all_a["window_count"] == 2 and all_a["grade_counts"]["danger"] == 1
         assert client.get("/api/v1/dashboard/company-slots", params={"date": "2026-10-04"}).json()["total"] == 1
         assert client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-13-01"}).status_code == 422
+
+
+def test_snapshot_reads_only_needed_history_but_features_match_full_history(tmp_path):
+    from app.services import compute_window
+    from app.schemas import WindowRequest
+    repo, net = repository(tmp_path), Network()
+    times = ["08:00", "09:10", "09:40", "10:00", "10:05", "10:20"]
+    for i, hm in enumerate(times):
+        ingest(repo, body(f"a{i}", "5", "a", at=f"2026-10-04T{hm}:30+09:00", sent=100 * (i + 1)), Data(), net)
+        ingest(repo, body(f"b{i}", "5", "b", at=f"2026-10-04T{hm}:40+09:00", sent=7), Data(), net)
+    last = ingest(repo, body("a-last", "5", "a", at="2026-10-04T10:22:00+09:00", sent=1000), Data(), net)
+    assert last["risk_window_id"]
+    # 네트워크 엔진에 들어간 마지막 입력(잘라 읽은 이력)과 사용자 전체 기록으로 다시 계산한 피처가 같아야 합니다.
+    used = [w for w in net.windows if w.user_id == "a"][-1].model_features
+    all_sessions, all_events = repo.observation_snapshot("a")
+    aligned_times = {e.session_id: e.occurred_at for e in all_events}
+    aligned = [s.model_copy(update={"started_at": aligned_times.get(s.id, s.started_at)}) for s in all_sessions]
+    start = datetime.fromisoformat("2026-10-04T10:20:00+09:00")
+    full = compute_window(WindowRequest(user_id="a", device_id="pc", start=start), aligned, all_events).model_features
+    assert used == full
+    assert used.history_coverage_seconds_1h == 3600 and used.user_request_count_observed_1h == 5  # 09:40 이후 a 기록

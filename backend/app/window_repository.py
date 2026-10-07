@@ -28,7 +28,8 @@ class WindowRepository:
     def _refresh_window_fusion(self, conn, window_id):
         row = conn.execute("SELECT payload FROM records WHERE kind='risk_window' AND id=?", (window_id,)).fetchone()
         group = json.loads(row["payload"])
-        members = conn.execute("""SELECT a.payload FROM window_members m JOIN records a
+        # CROSS JOIN: 구간 소속(window_id 인덱스)부터 읽도록 순서를 고정합니다. 기록이 많을 때 전체 스캔을 피합니다.
+        members = conn.execute("""SELECT a.payload FROM window_members m CROSS JOIN records a
             ON a.kind='passive_assessment' AND a.id=m.capture_id WHERE m.window_id=? ORDER BY m.capture_id""",
             (window_id,)).fetchall()
         prompts = []
@@ -97,8 +98,12 @@ class WindowRepository:
         if not exists:
             self._write_window(conn, group.model_dump(mode="json"))
         # 지연 수신도 원래 구간을 재계산합니다. 같은 사용자의 1시간 이력 피처가 바뀌는 이후 구간도 갱신합니다.
-        rows = conn.execute("SELECT payload FROM records WHERE kind='risk_window' AND user_id=?",
-                            (session.user_id,)).fetchall()
+        # 대상 구간만 SQL로 고릅니다(저장 형식 "...Z" 문자열은 시간 순서와 같게 비교됩니다). 사용자 구간 전체를 매번 읽지 않습니다.
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        at_utc = at.astimezone(timezone.utc)
+        rows = conn.execute("""SELECT payload FROM records WHERE kind='risk_window' AND user_id=?
+            AND (id=? OR (json_extract(payload, '$.end') > ? AND json_extract(payload, '$.end') <= ?))""",
+            (session.user_id, group.id, at_utc.strftime(fmt), (at_utc + timedelta(hours=1)).strftime(fmt))).fetchall()
         for row in rows:
             affected = json.loads(row["payload"])
             end = datetime.fromisoformat(affected["end"])
@@ -127,6 +132,13 @@ class WindowRepository:
                 event = AIUsageEvent.model_validate_json(event_row["payload"]) if event_row else None
                 self._attach_window(conn, assessment, session, event)
 
+    def dirty_window_ids(self):
+        """입력 버전과 분석 버전이 다른(재계산이 필요한) 구간 ID만 SQL로 찾습니다. 전체 구간을 읽지 않습니다."""
+        with self.connection() as conn:
+            rows = conn.execute("""SELECT id FROM records WHERE kind='risk_window'
+                AND json_extract(payload, '$.revision') != json_extract(payload, '$.network_revision')""").fetchall()
+        return [row["id"] for row in rows]
+
     def window_snapshot(self, window_id):
         with self.connection() as conn:
             conn.execute("BEGIN")
@@ -136,13 +148,40 @@ class WindowRepository:
             group = RiskWindow.model_validate_json(row["payload"])
             if group.revision == group.network_revision:
                 return None
-            # 같은 사용자의 ingest 관측만 읽습니다(최근 1시간 이력 포함). 단독 등록·직접 테스트는 포함하지 않습니다.
-            rows = conn.execute("""SELECT s.payload AS session, e.payload AS event FROM window_members m
-                JOIN records a ON a.kind='passive_assessment' AND a.id=m.capture_id AND a.user_id=?
-                JOIN records s ON s.kind='session' AND s.id=json_extract(a.payload, '$.session_id')
-                LEFT JOIN records c ON c.kind='capture' AND c.id=m.capture_id
-                LEFT JOIN records e ON e.kind='event' AND e.id=json_extract(c.payload, '$.ai_event_id')""",
-                (group.user_id,)).fetchall()
+            # 같은 사용자의 ingest 관측 중 이 구간 계산에 필요한 것만 읽습니다. 단독 등록·직접 테스트는 포함하지 않습니다.
+            # - 이 구간과 직전 1시간(구간 시작 60분 전부터)의 구간에 속한 관측: 5분 피처와 최근 1시간 이력 피처
+            # - 그 사용자의 가장 이른 관측 1건: 이력 관측 길이(history_coverage_seconds_1h) 계산용. 1시간 합계에는 들어가지 않음
+            # 사용자 기록 전체를 매번 읽지 않아 한 달 치 데이터에서도 수집 속도가 일정합니다.
+            fmt = "%Y-%m-%dT%H:%M:%SZ"
+            since = (group.start - timedelta(minutes=60)).astimezone(timezone.utc).strftime(fmt)
+            until = group.end.astimezone(timezone.utc).strftime(fmt)
+            # 사용자 구간을 먼저 고른 뒤(kind·user_id 인덱스) 소속 관측을 window_id 인덱스로 읽습니다.
+            windows = conn.execute("""SELECT id, json_extract(payload, '$.start') AS start FROM records
+                WHERE kind='risk_window' AND user_id=?""", (group.user_id,)).fetchall()
+            near = [w["id"] for w in windows if since <= w["start"] < until]
+            first = min(windows, key=lambda w: w["start"], default=None)
+            wanted = near + ([first["id"]] if first and first["id"] not in near else [])
+            members, earliest = [], None
+            for chunk in range(0, len(wanted), 500):
+                part = wanted[chunk:chunk + 500]
+                marks = ",".join("?" for _ in part)
+                members += conn.execute(f"SELECT capture_id, window_id FROM window_members WHERE window_id IN ({marks})",
+                                        part).fetchall()
+            if first:
+                earliest = next((m for m in members if m["window_id"] == first["id"]), None)
+            near_set = set(near)
+            members = [m for m in members if m["window_id"] in near_set]
+            ids = sorted({r["capture_id"] for r in members} | ({earliest["capture_id"]} if earliest else set()))
+            rows = []
+            for chunk in range(0, len(ids), 500):
+                part = ids[chunk:chunk + 500]
+                marks = ",".join("?" for _ in part)
+                rows += conn.execute(f"""SELECT s.payload AS session, e.payload AS event FROM records a
+                    JOIN records s ON s.kind='session' AND s.id=json_extract(a.payload, '$.session_id')
+                    LEFT JOIN records c ON c.kind='capture' AND c.id=a.id
+                    LEFT JOIN records e ON e.kind='event' AND e.id=json_extract(c.payload, '$.ai_event_id')
+                    WHERE a.kind='passive_assessment' AND a.user_id=? AND a.id IN ({marks})""",
+                    (group.user_id, *part)).fetchall()
         sessions = [NetworkSession.model_validate_json(r["session"]) for r in rows]
         events = [AIUsageEvent.model_validate_json(r["event"]) for r in rows if r["event"]]
         return group, sessions, events

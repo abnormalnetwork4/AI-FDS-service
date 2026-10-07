@@ -67,17 +67,33 @@ export function buildMatrix(events) {
   return { times, cell: (user, t) => cells.get(`${user}|${t}`) ?? null };
 }
 
-// Recharts 행 데이터: 시간대마다 { t, [user]: score|null }. 활동이 없거나 미판정이면 null(선이 끊김).
+// 한 사용자의 활동 사이 간격이 이보다 길면(예: 점심시간) 선을 끊습니다.
+export const MAX_GAP_MS = 30 * 60 * 1000;
+
+// Recharts 행 데이터. 사용자 선을 '구간 묶음(segment)'으로 나눠 키를 `${user}::${n}`로 둡니다.
+// 같은 묶음 안에서는 활동 없는 시간대를 건너뛰어 잇고(connectNulls), 30분 넘게 비거나 미판정 구간이 끼면 새 묶음으로 끊습니다.
+// 반환: { rows: [{ t, [key]: score|null }], segments: { [user]: [key, ...] } }
 export function buildRows(events, users) {
   const { times, cell } = buildMatrix(events);
-  return times.map((t) => {
-    const row = { t };
-    for (const user of users) {
+  const rows = times.map((t) => ({ t }));
+  const segments = {};
+  for (const user of users) {
+    segments[user] = [];
+    let key = null;
+    let lastT = null;
+    times.forEach((t, i) => {
       const w = cell(user, t);
-      row[user] = w && typeof w.score === 'number' ? w.score : null;
-    }
-    return row;
-  });
+      if (!w) return;
+      if (typeof w.score !== 'number') { key = null; return; } // 미판정: 점 없이 선을 끊음(0점으로 그리지 않음)
+      if (key === null || t - lastT > MAX_GAP_MS) {
+        key = `${user}::${segments[user].length}`;
+        segments[user].push(key);
+      }
+      rows[i][key] = w.score;
+      lastT = t;
+    });
+  }
+  return { rows, segments };
 }
 
 export function formatHm(ms) {
@@ -85,10 +101,21 @@ export function formatHm(ms) {
   return new Date(ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// x축 눈금: 데이터가 있는 시간대 앞뒤로 5분 단위.
+// x축 눈금: 2시간 이내면 5분, 그보다 길면 정각·30분 단위로 줄입니다(하루 근무시간이면 30분 간격).
 export function timeTicks(times) {
   if (!times.length) return [];
+  const first = times[0];
+  const last = times[times.length - 1];
+  if (last - first <= 2 * 3600 * 1000) {
+    const ticks = [];
+    for (let t = first; t <= last; t += SLOT_MS) ticks.push(t);
+    return ticks;
+  }
+  const step = 30 * 60 * 1000;
   const ticks = [];
-  for (let t = times[0]; t <= times[times.length - 1]; t += SLOT_MS) ticks.push(t);
+  for (let t = Math.ceil(first / step) * step; t <= last; t += step) ticks.push(t);
   return ticks;
 }
+
+// 시간대가 많으면(하루 전체 등) 표를 글자 대신 색 칸으로 줄여 보여 줍니다.
+export const COMPACT_SLOTS = 24;

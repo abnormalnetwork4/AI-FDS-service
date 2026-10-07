@@ -1,4 +1,4 @@
-import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import RiskOverview from "./RiskOverview.jsx";
@@ -290,7 +290,7 @@ function csvCell(v) {
 
 function StatusIcon({ status, size = 15 }) {
   if (status === "danger" || status === "warning") return <ShieldAlert size={size} color={LEVELS[status].color} />;
-  if (status !== "normal") return <ShieldQuestion size={size} color={LEVELS[status].color} />;
+  if (status !== "normal") return <ShieldQuestion size={size} color={levelText(status)} />;
   return <ShieldCheck size={size} color={LEVELS.normal.color} />;
 }
 
@@ -401,7 +401,7 @@ function TopIssues({ event }) {
         <div className="top-issues__chips">
           {top.map((t, i) => (
             <span key={t.code} className="issue-chip" style={{ borderColor: LEVELS[viewStatus(t)].color }}>
-              <b style={{ color: LEVELS[viewStatus(t)].color }}>{i + 1}</b>
+              <b style={{ color: levelText(viewStatus(t)) }}>{i + 1}</b>
               <span className="issue-chip__code">{t.code}</span>
               {t.label}
             </span>
@@ -437,10 +437,10 @@ function RiskScoreBadge({ score, level }) {
         />
       </svg>
       <div className="score-badge__center">
-        <span className="score-badge__num" style={{ color, transition: "color 0.6s ease" }}>{formatScore(score)}</span>
+        <span className="score-badge__num" style={{ color: levelText(level), transition: "color 0.6s ease" }}>{formatScore(score)}</span>
         <span className="score-badge__unit">{unit}</span>
       </div>
-      <span className="score-badge__label" style={{ color, borderColor: color }}>{label}</span>
+      <span className="score-badge__label" style={{ color: levelText(level), borderColor: color }}>{label}</span>
     </div>
   );
 }
@@ -495,7 +495,7 @@ function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
         <span className="session-row__meta session-row__id" title={session.sessionId ?? session.id}>{session.sessionId ?? session.id}</span>
         <span className="session-row__meta">{session.connectedAt}</span>
         {hits.length > 0 && (
-          <span className="session-row__find" style={{ color: LEVELS[viewStatus(hits[0])].color }}>
+          <span className="session-row__find" style={{ color: levelText(viewStatus(hits[0])) }}>
             탐지 {hits[0].code} {hits[0].label.replace(/\s*·\s*\d+분 집계$/, "")}{hitCount > 1 ? ` 외 ${hitCount - 1}건` : ""}
           </span>
         )}
@@ -525,8 +525,8 @@ function HoverTooltip({ session, pos }) {
   return (
     <div className="hover-tooltip" style={{ left, top, width: TOOLTIP_W }}>
       <div className="hover-tooltip__head">
-        <span style={{ color: LEVELS[level].color }}>{session.score == null ? "점수 미제공" : `${formatScore(session.score)}점`}</span>
-        <span className="hover-tooltip__badge" style={{ color: LEVELS[level].color, borderColor: LEVELS[level].color }}>
+        <span style={{ color: levelText(level) }}>{session.score == null ? "점수 미제공" : `${formatScore(session.score)}점`}</span>
+        <span className="hover-tooltip__badge" style={{ color: levelText(level), borderColor: LEVELS[level].color }}>
           {LEVELS[level].label}
         </span>
         <span className="hover-tooltip__conf">신뢰도 {session.confidence == null ? "미제공" : `${session.confidence}%`}</span>
@@ -745,8 +745,8 @@ function WindowSummaryCard({ event }) {
         <span className="window-card__op">=</span>
         <div className="score-tile score-tile--total" style={{ borderColor: LEVELS[level].color }}>
           <span className="score-tile__label">통합 점수</span>
-          <span className="score-tile__value" style={{ color: LEVELS[level].color }}>{formatScore(event.score)}<small>/100</small></span>
-          <span className="score-tile__sub" style={{ color: LEVELS[level].color, fontWeight: 700 }}>{LEVELS[level].label}</span>
+          <span className="score-tile__value" style={{ color: levelText(level) }}>{formatScore(event.score)}<small>/100</small></span>
+          <span className="score-tile__sub" style={{ color: levelText(level), fontWeight: 700 }}>{LEVELS[level].label}</span>
         </div>
       </div>
 
@@ -813,7 +813,7 @@ function SameSlotPanel({ selected, events, isMock, onSelect }) {
                 <tr key={w.id} className={w.id === selected.id ? "is-max" : "is-link"} onClick={() => onSelect(w)}
                   title="클릭하면 이 사용자 구간을 엽니다">
                   <td>{w.user} · {w.device_id}{w.id === selected.id && <b> · 현재</b>}</td>
-                  <td style={{ color: LEVELS[eventLevel(w)].color }}>{LEVELS[eventLevel(w)].label}</td>
+                  <td style={{ color: levelText(eventLevel(w)), fontWeight: 600 }}>{LEVELS[eventLevel(w)].label}</td>
                   <td>{formatScore(w.score)}</td>
                   <td>{w.prompt_max_score == null ? "—" : `${formatScore(w.prompt_max_score)}/60`}</td>
                 </tr>
@@ -1239,7 +1239,7 @@ export default function RiskDashboard() {
         .ov-chip__grade { font-size: 11px; font-weight: 600; }
         .ov-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; border: 1px solid transparent; flex-shrink: 0; }
         .ov-chip:not(.is-on) .ov-swatch { border-color: #c3c2b7; height: 1px; }
-        .ov-hint { font-size: 12px; color: #8A6D00; }
+        .ov-hint { font-size: 12px; color: #B58500; }
         .ov-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
         .ov-card__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; }
         .ov-card__head span { font-size: 11.5px; color: var(--text-dim); }
@@ -1259,10 +1259,17 @@ export default function RiskDashboard() {
         .ov-cell { border: 1px solid; background: var(--panel); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
         .ov-cell:hover { background: var(--tint); }
         .ov-cell--empty { color: #c3c2b7; }
+        .ov-td--compact, .ov-table .ov-cell--empty { padding: 2px 1px; }
+        .ov-th--compact { padding: 4px 0 !important; font-size: 10.5px; text-align: left !important; overflow: visible; max-width: 14px; }
+        .ov-dot { display: block; width: 12px; height: 14px; border: none; border-radius: 3px; padding: 0; margin: 0 auto; cursor: pointer; }
+        .ov-dot--normal { opacity: .45; }
+        .ov-dot:hover { outline: 2px solid var(--text); outline-offset: 1px; }
+        .ov-dot--static { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; cursor: default; }
+        .ov-keys { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
         .window-card { margin-top: 18px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
         .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
         .window-card__phase { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
-        .window-card__phase.is-open { color: #8A6D00; }
+        .window-card__phase.is-open { color: #B58500; }
         .window-card__when { font-weight: 600; }
         .window-card__who { color: var(--text-dim); }
         .window-card__formula { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -1277,7 +1284,7 @@ export default function RiskDashboard() {
         .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
         .window-card__source code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .window-card__muted { color: var(--text-dim); flex-shrink: 0; }
-        .window-card__reason { margin: 10px 0 0; font-size: 12.5px; color: #8A6D00; }
+        .window-card__reason { margin: 10px 0 0; font-size: 12.5px; color: #B58500; }
         .window-card__notes { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
         .window-card__notes summary { cursor: pointer; }
         .window-card__notes ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
@@ -1360,7 +1367,7 @@ export default function RiskDashboard() {
             <div className="header-stats__row">
               <span style={{ color: LEVELS.danger.color }}>위험 {counts.danger}</span>
               <span style={{ color: LEVELS.warning.color }}>경고 {counts.warning}</span>
-              <span style={{ color: LEVELS.caution.color }}>주의 {counts.caution}</span>
+              <span style={{ color: levelText("caution") }}>주의 {counts.caution}</span>
               <span style={{ color: LEVELS.normal.color }}>정상 {counts.normal}</span>
               <span style={{ color: LEVELS.pending.color }}>미판정 {counts.pending}</span>
               <span style={{ color: LEVELS.error.color }}>오류 {counts.error}</span>
