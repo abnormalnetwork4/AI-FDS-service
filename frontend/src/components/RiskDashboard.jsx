@@ -711,6 +711,64 @@ function CompanyBreakdown({ event }) {
   );
 }
 
+// 구간 요약 카드: 시간·대상 → 점수 산식(타일) → 최고 점수 근거 → 접을 수 있는 판정 기준 안내.
+// 값은 서버 응답만 쓰며, 미판정 값은 '—'로 둡니다.
+function WindowSummaryCard({ event }) {
+  const level = eventLevel(event);
+  const fmtHm = (ms) => (ms == null ? "--:--" : new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }));
+  const day = event.startedAtMs == null ? "" : new Date(event.startedAtMs).toLocaleDateString("ko-KR");
+  const legacy = event.scope === "company";
+  const capture = event.prompt_source_capture_id;
+  return (
+    <div className="window-card" role="note">
+      <div className="window-card__head">
+        <span className={`window-card__phase ${event.phase === "open" ? "is-open" : ""}`}>
+          {event.phase === "open" ? "집계 중 · 잠정" : "종료된 구간"}
+        </span>
+        <span className="window-card__when">{day} {fmtHm(event.startedAtMs)} ~ {fmtHm(event.endedAtMs)}</span>
+        <span className="window-card__who">{legacy ? "회사 전체(이전 버전)" : `${event.user} · ${event.device_id}`}</span>
+      </div>
+
+      <div className="window-card__formula" aria-label="통합 점수 산식">
+        <div className="score-tile">
+          <span className="score-tile__label">프롬프트 최고</span>
+          <span className="score-tile__value">{formatScore(event.prompt_max_score)}<small>/60</small></span>
+          <span className="score-tile__sub">구간 내 최고 1건</span>
+        </div>
+        <span className="window-card__op">+</span>
+        <div className="score-tile">
+          <span className="score-tile__label">네트워크 반영</span>
+          <span className="score-tile__value">{formatScore(event.network_contribution)}<small>/40</small></span>
+          <span className="score-tile__sub">{formatScore(event.network_score)}점 × 0.4</span>
+        </div>
+        <span className="window-card__op">=</span>
+        <div className="score-tile score-tile--total" style={{ borderColor: LEVELS[level].color }}>
+          <span className="score-tile__label">통합 점수</span>
+          <span className="score-tile__value" style={{ color: LEVELS[level].color }}>{formatScore(event.score)}<small>/100</small></span>
+          <span className="score-tile__sub" style={{ color: LEVELS[level].color, fontWeight: 700 }}>{LEVELS[level].label}</span>
+        </div>
+      </div>
+
+      {capture && (
+        <div className="window-card__source">
+          <span>최고 점수 근거</span>
+          <code title={capture}>{capture}</code>
+          {event.prompt_source_user_id && event.prompt_source_user_id !== event.user && <span className="window-card__muted">사용자 {event.prompt_source_user_id}</span>}
+        </div>
+      )}
+      {event.fusion_status !== "complete" && <p className="window-card__reason">{event.reason}</p>}
+
+      <details className="window-card__notes">
+        <summary>검토 우선순위용 지표이며 위반 확정이 아닙니다 · 판정 기준 보기</summary>
+        <ul>
+          {SCOPE_NOTE.map((line) => <li key={line}>{line}</li>)}
+          <li>늦게 도착한 기록이 있으면 구간 결과가 갱신됩니다.</li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 // 날짜·사용자 선택 목록. 수집 결과가 바뀌면(목록 건수 변화) 다시 읽습니다.
 function useScopeOptions(date, version) {
   const [dates, setDates] = useState([]);
@@ -1166,6 +1224,28 @@ export default function RiskDashboard() {
           background: var(--panel); color: var(--text); font-size: 12px; }
         .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
         .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+        .window-card { margin-top: 18px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
+        .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+        .window-card__phase { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+        .window-card__phase.is-open { color: #8A6D00; }
+        .window-card__when { font-weight: 600; }
+        .window-card__who { color: var(--text-dim); }
+        .window-card__formula { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .window-card__op { align-self: center; font-size: 18px; font-weight: 600; color: var(--text-dim); }
+        .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-width: 0; }
+        .score-tile--total { border-width: 2px; }
+        .score-tile__label { font-size: 11.5px; color: var(--text-dim); }
+        .score-tile__value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+        .score-tile__value small { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
+        .score-tile__sub { font-size: 11.5px; color: var(--text-dim); }
+        .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; min-width: 0; }
+        .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
+        .window-card__source code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .window-card__muted { color: var(--text-dim); flex-shrink: 0; }
+        .window-card__reason { margin: 10px 0 0; font-size: 12.5px; color: #8A6D00; }
+        .window-card__notes { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+        .window-card__notes summary { cursor: pointer; }
+        .window-card__notes ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
         .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
         .llm-box__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; gap: 10px; flex-wrap: wrap; }
         .llm-box__title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--accent); }
@@ -1422,15 +1502,7 @@ export default function RiskDashboard() {
             </div>
 
             {(selected.scope === "company" || selected.scope === "user_device") && (
-              <div className="llm-box" role="note">
-                <b>{selected.phase === "open" ? "집계 중 · 잠정 점수" : "종료된 5분 구간"}</b>
-                <p>{selected.connectedAt} ~ {new Date(selected.endedAtMs).toLocaleTimeString("ko-KR", { hour12: false })} (끝 시각 제외)</p>
-                <p>프롬프트 최고 {formatScore(selected.prompt_max_score)}/60 + 네트워크 {formatScore(selected.network_score)} × 0.4 = {formatScore(selected.score)}/100</p>
-                {selected.prompt_source_capture_id && <p>최고 점수 근거: {selected.prompt_source_capture_id} · 사용자 {selected.prompt_source_user_id}</p>}
-                <p>{selected.reason}</p>
-                {SCOPE_NOTE.map((line) => <p key={line}>{line}</p>)}
-                <p>늦게 도착한 기록이 있으면 구간 결과가 갱신됩니다.</p>
-              </div>
+              <WindowSummaryCard event={selected} />
             )}
 
             {(selected.scope === "company" || selected.scope === "user_device") && <CompanyBreakdown event={selected} />}
