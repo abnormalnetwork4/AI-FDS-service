@@ -66,6 +66,8 @@
 
 ## 백엔드 연결
 
+2026-10-08 통합 변경: 자동 수집은 한 회사의 모든 사용자·단말을 고정 5분 구간으로 합산합니다. 같은 구간의 프롬프트 **최고** 점수와 통합하며 개인 등급을 만들지 않습니다. 모델 파일·24개 입력 필드 이름·네트워크 산식은 유지합니다. `user_*_observed_1h` 필드도 이 경로에서는 회사 전체 1시간 집계값을 담습니다. 기존 사용자별 피처 검증과 회사 집계의 성능 검증은 구분해야 합니다. 자세한 API·부분 결과·이전 기록 처리는 [통합 계약](../../backend/grade-api-contract.md)을 참고하세요.
+
 백엔드 기본 Network 엔진이 이 폴더를 읽습니다([`backend/app/network_model.py`](../../backend/app/network_model.py)).
 
 1. 수집 이벤트 → `backend/app/services.py`의 `model_features()`가 학습과 같은 정의로 24개 피처를 계산해 Window의 `model_features`에 저장

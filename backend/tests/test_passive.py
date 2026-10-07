@@ -45,11 +45,11 @@ def test_metadata_only_analysis_never_calls_data_model(client):
     result = response.json()
     assert result["processing_state"] == "finished"
     assert result["status"] == "pending"
-    assert result["final_grade"] == "unassessed"
+    assert result["final_grade"] is None
     assert result["results"][0]["findings"][0]["code"] == "prompt_unavailable"
-    assert len(result["results"]) == 3
+    assert len(result["results"]) == 1
     windows = client.get("/api/v1/behavior-windows").json()
-    assert {w["duration_minutes"] for w in windows} == {5, 60}
+    assert {w["duration_minutes"] for w in windows} == {5}
     assert all(w["features"]["direct_connections"] == 0 for w in windows)
     assert all(w["features"]["unknown_gateway_connections"] == 1 for w in windows)
     assert all(w["features"]["bytes_sent"] == 1234 for w in windows)
@@ -88,7 +88,7 @@ def test_retry_and_conflicting_content(client):
     assert first.status_code == 200
     second = client.post("/api/v1/ingest/captures", json=body)
     assert first.json() == second.json()
-    assert len(client.get("/api/v1/risks").json()) == 3
+    assert len(client.get("/api/v1/risks").json()) == 2
     body["session"]["bytes_sent"] += 1
     assert client.post("/api/v1/ingest/captures", json=body).status_code == 409
 
@@ -125,7 +125,8 @@ def test_prior_capture_visible_while_its_model_is_running(tmp_path):
             assert len(repo.list("session")) == 1
             assert repo.get("passive_assessment", "first")["processing_state"] == "processing"
             result = ingest(repo, second, StubDataRiskEngine(), StubNetworkRiskEngine())
-            for risk in result["results"][1:]:
+            company = repo.get("company_assessment", result["company_window_id"])
+            for risk in [r for r in company["results"] if r["engine"] == "network"]:
                 assert repo.get("window", risk["window_id"])["features"]["request_count"] == 2
         finally:
             release.set()
@@ -175,8 +176,8 @@ def test_concurrent_retransmission_commits_one_result(tmp_path):
         results = [job.result() for job in jobs]
     assert results[0] == results[1]
     assert len(repo.list("session")) == 1
-    assert len(repo.list("risk")) == 3
-    assert len(repo.list("window")) == 2
+    assert len(repo.list("risk")) == 2
+    assert len(repo.list("window")) == 1
 
 
 def test_retry_resumes_after_recording_but_before_analysis(tmp_path, monkeypatch):
@@ -184,15 +185,15 @@ def test_retry_resumes_after_recording_but_before_analysis(tmp_path, monkeypatch
     repo = Repository(tmp_path / "fds.db")
     repo.initialize()
     body = CaptureIngest.model_validate(capture())
-    original = collection.compute_window
+    original = collection.data_analysis
     def interrupted(*args, **kwargs):
         raise RuntimeError("Simulated interruption after capture commit")
-    monkeypatch.setattr(collection, "compute_window", interrupted)
+    monkeypatch.setattr(collection, "data_analysis", interrupted)
     with pytest.raises(RuntimeError):
         ingest(repo, body, StubDataRiskEngine(), StubNetworkRiskEngine())
     assert len(repo.list("session")) == 1
     assert repo.get("passive_assessment", body.id)["processing_state"] == "processing"
-    monkeypatch.setattr(collection, "compute_window", original)
+    monkeypatch.setattr(collection, "data_analysis", original)
     result = ingest(repo, body, StubDataRiskEngine(), StubNetworkRiskEngine())
     assert result["processing_state"] == "finished"
     assert len(repo.list("session")) == 1

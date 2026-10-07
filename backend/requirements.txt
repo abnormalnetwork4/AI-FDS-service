@@ -1,9 +1,11 @@
 fastapi==0.141.1
 pydantic==2.13.5
 uvicorn==0.53.0
-# 프롬프트 모델(model/prompt)과 Network 모델(model/network) 실행용
+# 프롬프트 로지스틱 모델(model/prompt/regression), 이전 XGBoost 및 Network 모델 실행용
 numpy==2.3.5
 pandas==3.0.6
 scikit-learn==1.7.2
+scipy==1.18.1
+threadpoolctl==3.7.0
 xgboost==3.4.1
 joblib==1.5.2

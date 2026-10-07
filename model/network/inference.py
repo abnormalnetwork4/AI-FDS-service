@@ -34,7 +34,8 @@ class NetworkRiskEngine:
         artifact_dir = Path(artifact_dir)
         meta = json.loads((artifact_dir / 'model_meta.json').read_text(encoding='utf-8'))
         booster = xgb.Booster()
-        booster.load_model(str(artifact_dir / 'xgb_network_model.json'))
+        # Python에서 파일을 읽어 Windows의 한글 경로도 처리합니다.
+        booster.load_model(bytearray((artifact_dir / 'xgb_network_model.json').read_bytes()))
         return cls(booster, meta['features'], meta['classes'], meta['imputer_medians'])
 
     def _matrix(self, df):

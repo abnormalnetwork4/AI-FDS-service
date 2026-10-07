@@ -18,9 +18,9 @@ flowchart LR
 
 ## 현재 구현
 
-관측된 세션·선택적인 AI 사용 로그 수신, 사용자·단말·세션·시간 연결 검증, 관측 자료 우선 저장, 최근 5분/1시간 집계, Data/Network 엔진 연결, 재전송 중복 방지, 결과·통계 조회를 구현했습니다.
+관측 세션·AI 사용 로그 수신, 사용자·단말·시간 연결 검증, 회사 전체 고정 5분 집계, Data/Network 엔진 연결, 재전송 중복 방지, 구간별 결과·통계 조회를 구현했습니다. 한 서버/DB는 한 회사 전용입니다.
 
-All_in_one 프롬프트 모델(TF-IDF + XGBoost 네 분류기)과 [`model/network`](../model/network/)의 XGBoost Network 모델(5분 구간)을 연결했습니다. 통합 등급 정책은 아직 미연결입니다. 프롬프트 분류가 완료되어도 위험 점수는 `null`이며 각 항목의 `detected`, `probability`, `threshold`로 결과를 제공합니다. `NETWORK_ENGINE=stub` 또는 `PROMPT_ENGINE=stub`으로 서버를 시작하면 해당 엔진은 Stub을 씁니다. `status: pending`, `final_grade: unassessed`는 안전 판정이 아닙니다. `processing_state: finished`는 이번 처리 과정 종료를 의미하며 모든 위험 항목의 실제 모델 분석 완료를 뜻하지 않습니다.
+Regression 프롬프트 모델(TF-IDF + LogisticRegression 네 분류기, 임계값 0.45 초과)과 [`model/network`](../model/network/)의 XGBoost Network 모델을 연결했습니다. 회사 전체 고정 5분 구간에서 **프롬프트 최고 점수(60점) + 전체 네트워크 점수 × 0.4(40점)**로 통합합니다. 개인 점수가 아닙니다. 구간 내 프롬프트가 하나라도 미판정·오류거나 네트워크가 미완료면 통합 점수·등급은 `null`입니다. `confidence`도 정의가 없어 `null`입니다. Stub 엔진은 미판정입니다. 개별 Assessment는 프롬프트 결과와 `company_window_id`를 제공하고 회사 결과는 별도 조회합니다. 상세 계약은 [통합 등급 API](grade-api-contract.md)를 참고하세요.
 
 ## 설치·실행
 
@@ -41,7 +41,7 @@ py -3.12 -m venv .venv
 - DB 변경: 서버 시작 전 `$env:DATABASE_PATH = '원하는파일경로'`
 - 브라우저 조회 허용 주소: `CORS_ORIGINS` (기본 `http://localhost:3000,http://localhost:5173`)
 
-기본 실행은 [`model/prompt/all-in-one`](../model/prompt/)의 모델을 서버 시작 시 한 번 불러옵니다. 요청마다 학습하지 않습니다. `/health`의 `data_engine: AllInOneDataRiskEngine`과 `prompt_model_version`으로 연결 상태를 확인합니다. 모델 파일 누락·해시 불일치·라이브러리 버전 불일치 시 시작을 실패시키며 Stub으로 몰래 바꾸지 않습니다. 모델 없이 수집 기능만 확인하려면 시작 전에 `$env:PROMPT_ENGINE = 'stub'`을 지정하고, 실제 모델로 복귀하려면 `Remove-Item Env:PROMPT_ENGINE` 후 재시작합니다. 다른 모델 폴더는 `PROMPT_MODEL_DIR`로 지정할 수 있습니다.
+기본 실행은 [`model/prompt/regression`](../model/prompt/)의 모델을 서버 시작 시 한 번 불러옵니다. 요청마다 학습하지 않습니다. `/health`의 `data_engine: RegressionDataRiskEngine`과 `prompt_model_version`으로 연결 상태를 확인합니다. 모델 파일 누락·해시 불일치·scikit-learn 버전 불일치 시 시작을 실패시키며 Stub으로 몰래 바꾸지 않습니다. 모델 없이 수집 기능만 확인하려면 시작 전에 `$env:PROMPT_ENGINE = 'stub'`을 지정하고, 실제 모델로 복귀하려면 `Remove-Item Env:PROMPT_ENGINE` 후 재시작합니다. 이전 XGBoost 모델은 `PROMPT_ENGINE=all-in-one`으로 선택할 수 있습니다. 다른 모델 폴더는 해당 엔진 형식에 맞춰 `PROMPT_MODEL_DIR`로 지정합니다. 이전 환경 설정이 남아 있다면 `PROMPT_ENGINE`을 `regression`으로 바꾸고 `PROMPT_MODEL_DIR`도 새 폴더로 바꾸거나 해제한 뒤 재시작하세요.
 
 ## 관측 자료 전송
 
@@ -72,9 +72,9 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 
 `provider`와 `prompt`는 선택 항목입니다. 프롬프트가 있으면 `source: application_log`와 `provider`가 필요합니다. 네트워크 메타데이터만 있는 경우에는 두 필드를 생략할 수 있습니다. 내부 저장용 관측 ID와 원래 `session_id`를 분리하며, 대시보드는 원래 세션 ID를 보여줍니다. 기본 세션 조회의 `parent_session_id`로 원래 세션을 확인할 수 있습니다.
 
-자료 저장 후 Data, Network 5분, Network 60분 분석을 병렬 호출하고 **완료되는 엔진부터 결과를 저장**합니다. 전체 작업이 끝나기 전에도 `processing_state: processing`과 부분 결과를 조회할 수 있습니다. 5분·60분은 실행 간격이 아니라 과거 행동을 참고하는 범위입니다. 모델 어댑터는 동시에 호출될 수 있으므로 공유 상태를 안전하게 관리해야 합니다.
+자료 저장 후 개별 프롬프트를 분석하고 회사 전체 5분 네트워크를 갱신합니다. 10:00~10:05처럼 고정된 반개구간을 사용하며 입력마다 잠정 결과를 갱신합니다. 종료 전 `phase: open`, 종료 후 `closed`입니다. 백그라운드 작업은 종료 표시와 미처리 네트워크 재계산을 수행합니다. 60분 별도 추론은 호출하지 않고 1시간 이력은 네트워크 입력 피처로 반영합니다.
 
-대시보드는 `GET /api/v1/dashboard/stream`의 SSE 변경 알림을 받아 결과를 재조회합니다. 서버는 공유 SQLite 변경 번호를 0.25초 간격으로 확인하고 변경 시 알림을 보냅니다. 이는 분석 대기 시간이 아니며 실제 표시 지연에는 수집·모델 실행·DB·네트워크 시간이 더해집니다. 스트림은 원문이나 사용자 정보를 보내지 않으며, 재접속 시 최신 목록을 재조회합니다. 개별 알림 이력을 재생하는 기능은 아닙니다. 프록시 배포 시 SSE 응답 버퍼링을 끄고 장기 연결을 허용해야 합니다.
+대시보드는 `GET /api/v1/dashboard/stream`의 SSE changed 알림을 받아 `/dashboard/company-windows`를 재조회합니다. Assessment 및 회사 구간 INSERT/UPDATE 때 DB 변경 번호가 올라갑니다. `CompanyRepository._refresh_company_fusion()`이 최고 프롬프트를 선택하고 `fuse_parts()` → `rs.integrate()`로 통합합니다. 최신 입력 버전과 일치하는 네트워크 결과만 저장합니다. SSE는 변경 번호만 전송하고 프록시의 응답 버퍼링은 꺼야 합니다.
 
 수집 API 응답은 전체 분석 후 반환됩니다. 원본 AI 통신과 분리된 수집기에서 전송하고, AI 요청 경로가 이 API의 응답을 기다리게 하지 마세요. 큐·자동 재시도·추론 시간 제한·부하 제어는 후속 구현 대상입니다. 처리 중 프로세스가 종료되면 같은 이벤트를 재전송해야 하며, 저장된 부분 결과를 유지하고 나머지를 확정합니다.
 
@@ -118,7 +118,9 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | POST | `/api/v1/ingest/captures` | 관측 자료 저장 후 사후 분석 |
 | GET | `/api/v1/captures` | 수집 기록·프롬프트 확보 상태 |
 | GET | `/api/v1/assessments` | 캡처별 분석 묶음 |
-| GET | `/api/v1/assessments/{capture_id}` | Data 1개 + Network 5분/1시간 2개 결과 |
+| GET | `/api/v1/assessments/{capture_id}` | 개별 프롬프트 결과 + company_window_id |
+| GET | `/api/v1/company-windows/{window_id}` | 회사 전체 5분 통합 결과 |
+| GET | `/api/v1/dashboard/company-windows` | 화면용 회사 5분 구간 목록 |
 | POST / GET | `/api/v1/network-sessions` | 세션 개별 등록/조회 |
 | POST / GET | `/api/v1/ai-usage-events` | AI 사용 이벤트 개별 등록/조회 |
 | POST / GET | `/api/v1/behavior-windows` | 지정 구간 집계 생성/조회 |
@@ -129,7 +131,7 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | GET | `/api/v1/dashboard/events` | 캡처별 화면 데이터와 전체 건수 |
 | GET | `/api/v1/dashboard/explanation?capture_id=...` | 저장된 분석 근거 요약 |
 
-목록은 `user_id`, `limit`(기본 50, 최대 200), `offset`을 지원합니다. `/network-sessions`와 `/ai-usage-events`의 개별 등록은 저장만 수행합니다. 자동 분석은 `/ingest/captures`와 `/ingest/events`에서 실행합니다. 대시보드 평균은 완료된 엔진 호출 점수의 단순 평균이며 통합 등급이 아닙니다. React 화면은 `dashboard/events`로 최근 200건을 조회합니다. 개별 세션 등록만 한 기록은 캡처 분석 목록에 나타나지 않습니다.
+목록은 `limit`(기본 50, 최대 200), `offset`을 지원하며 개별 관측 목록만 `user_id` 필터를 제공합니다. `/network-sessions`, `/ai-usage-events`의 개별 등록과 직접 프롬프트 테스트는 회사 자동 통합에 포함하지 않습니다. 자동 분석은 `/ingest/captures`, `/ingest/events`에서 실행합니다. 대시보드 평균은 통합 완료 회사 구간을 한 번씩 집계하며 `graded_window_count`를 사용합니다. React 화면은 `dashboard/company-windows`로 최근 구간을 조회합니다.
 
 ## 수집·분석 처리 기준
 
@@ -139,21 +141,21 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 
 수집 API는 분석까지 수행한 뒤 응답합니다. 이것은 원본 AI 통신과 분리된 수집기→FDS 통신입니다. 수집기 버퍼·영속 작업 큐·자동 재시도는 별도 구현 대상입니다.
 
-캡처 집계는 관측 세션 종료 시각 기준 최근 5분/1시간을 보며 전송량은 세션 시작 시각에 귀속합니다. 새 이벤트는 발생 시각에 증가량을 귀속합니다. 늦게 도착한 기록으로 과거 결과를 재계산하는 기능과 개인별 기준선은 후속 구현 영역입니다.
+AI 사용 로그가 있으면 요청 발생 시각, 없으면 세션 시작 시각으로 고정 5분 구간을 선택합니다. 전송량도 같은 시각에 귀속하며 긴 세션의 바이트를 임의로 분할하지 않습니다. 지연 수신은 원래 구간과 이후 1시간 이력에 영향을 받는 구간을 재계산합니다. 서버 재시작 시 기존 관측·저장된 프롬프트 결과로 회사 구간을 구성하고 네트워크를 재계산합니다. 개인별 기준선은 사용하지 않습니다.
 
 ## 프롬프트·모델 연결
 
 원문은 앞뒤 공백·개행을 보존해 모델에 전달하며 DB에는 저장하지 않습니다. 수집 입력 상한은 131,072자, 현재 Data 모델 계약은 16,384자입니다. 모델 상한을 넘는 관측은 메타데이터를 저장하고 `prompt_too_large`로 표시합니다. 수집 상한보다 큰 원문은 수집기에서 생략하고 메타데이터만 보내야 합니다. 원문이 없거나 비어 있으면 Data 모델을 호출하지 않습니다.
 
-`app/prompt_engine.py`가 `request.text`를 모델에 전달합니다. 받은 노트북과 같은 NFKC·개행 정리·앞뒤 공백 제거, 공통 TF-IDF, 네 XGBoost 분류기, `probability > 0.5` 판정을 사용합니다. 네 항목은 `AI_steal`, `prompt_injection`, `abuse_act`, `token_waste_repeat`이며 복수 탐지가 가능합니다. 모든 항목 미탐지는 실제 안전·정책 준수를 보장하지 않습니다. `input_origin`은 결과에 보존하지만 기존 모델은 문장만 분류하므로 출처·업무 맥락을 학습 특징으로 사용하지 않습니다.
+`app/prompt_engine.py`가 `request.text`를 모델에 전달합니다. 받은 `Regression.ipynb`와 같은 NFKC·개행 정리·앞뒤 공백 제거, 공통 TF-IDF(`char_wb`, 3~5글자, 최대 150,000개 특징), 네 LogisticRegression 분류기(`C=3`, `max_iter=1000`), `probability > 0.45` 판정을 사용합니다. 0.45와 같으면 미탐지입니다. 원본의 배치 JSON을 직접 반환하는 대신 기존 `RiskResult` 및 대시보드 응답 구조로 연결합니다. 네 항목은 `AI_steal`, `prompt_injection`, `abuse_act`, `token_waste_repeat`이며 복수 탐지가 가능합니다. 모든 항목 미탐지는 실제 안전·정책 준수를 보장하지 않습니다. `input_origin`은 결과에 보존하지만 기존 모델은 문장만 분류하므로 출처·업무 맥락을 학습 특징으로 사용하지 않습니다.
 
 분류 결과 예시(형식 설명용 숫자):
 
 ```json
-{"code":"AI_steal","name":"인공지능 증류","status":"complete","score":null,"detected":true,"probability":0.91,"threshold":0.5,"reason":"라벨 정의이며 개별 판단 근거는 미제공"}
+{"code":"AI_steal","name":"인공지능 증류","status":"complete","score":null,"detected":true,"probability":0.91,"threshold":0.45,"reason":"라벨 정의이며 개별 판단 근거는 미제공"}
 ```
 
-`status: complete`는 점수가 없어도 분류 완료를 뜻할 수 있습니다. 예측 확률을 위험 점수로 변환하지 않고 엔진 평균·통합 등급에도 넣지 않습니다. 기존 점수형 엔진 출력과 과거 DB 기록은 계속 읽을 수 있습니다. 원문·예외 상세는 저장하지 않으며 표시되는 설명은 라벨 정의입니다.
+`status: complete`는 점수가 없어도 분류 완료를 뜻할 수 있습니다. 항목별 확률·위험 점수는 구분합니다. 프롬프트 엔진 전체는 네 항목의 탐지 여부로 최대 60점의 정책 점수를 계산해 `RiskResult.score`에 넣고 `score_max: 60`, `scoring_policy: prompt-product-base10-v1`를 함께 제공합니다. 각 항목의 `score`는 여전히 null이며 기여도는 제공하지 않습니다. 기존 점수형 엔진 출력과 과거 DB 기록은 계속 읽을 수 있습니다. 원문·예외 상세는 저장하지 않으며 표시되는 설명은 라벨 정의입니다.
 
 실제 모델 → 수집 API → 저장 → 화면 연결 확인:
 
@@ -161,19 +163,21 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 .\.venv\Scripts\python.exe examples/prompt_model_demo.py
 ```
 
-받은 원본에는 모델 체크포인트가 없어 기본 546,973건 구성으로 한 번 학습해 저장했습니다. 추가 보강 실험·튜닝·임계값 조정은 적용하지 않았습니다. 모델과 전처리 파일·해시는 `model/prompt/all-in-one/manifest.json`에 있습니다. 학습 데이터와 원본 노트북은 이 저장소에 복제하지 않았습니다. 동일 원본을 가진 팀원은 다음과 같이 새 폴더에 재생성할 수 있습니다.
+받은 원본에는 모델 체크포인트가 없어 승인된 고유 문장 546,973건으로 한 번 학습해 저장했습니다. 빈 항목 라벨은 0으로 채우지 않고 해당 분류기의 학습에서 제외합니다. 추가 보강 실험·튜닝·임계값 조정은 적용하지 않았습니다. 모델과 전처리 파일·해시는 `model/prompt/regression/manifest.json`에 있습니다. 학습 데이터와 원본 노트북은 이 저장소에 복제하지 않았습니다. 동일 원본을 가진 팀원은 다음과 같이 새 폴더에 재생성할 수 있습니다.
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/train_prompt_model.py --source 'C:\경로\All_in_one' --output '../model/prompt/all-in-one-retrained'
+.\.venv\Scripts\python.exe scripts/train_regression_prompt_model.py --source 'C:\경로\All_in_one(regression)' --output '../model/prompt/regression-retrained'
 ```
 
-학습 도구는 검토한 원본 노트북의 SHA-256을 확인하고 설정·전처리·학습 정의 셀만 실행합니다. 원본 CSV 수정, 전체 Run All, 테스트 기반 튜닝은 하지 않습니다. 소스가 바뀌면 해시만 바꾸지 말고 해당 코드를 재검토해야 합니다. TF-IDF joblib 파일은 신뢰하는 학습 절차에서 생성한 것만 배포합니다.
+학습 도구는 검토한 원본 노트북의 SHA-256을 확인하고 설정·전처리·학습 정의 셀만 실행합니다. CSV 승인 해시·수량·라벨·중복 검사와 학습 수렴 검사를 유지합니다. 원본 CSV 수정, 전체 Run All, 테스트 기반 튜닝은 하지 않습니다. 소스가 바뀌면 해시만 바꾸지 말고 해당 코드를 재검토해야 합니다. TF-IDF와 분류기 joblib 파일은 신뢰하는 학습 절차에서 생성한 것만 배포합니다.
+
+원본의 형식 확인용 5건·20개 확률은 `tests/fixtures/regression_reference.json`에 보관합니다. 재학습 후 탐지 여부는 모두 일치했으나 제공 JSON과 확률은 최대 약 1.29%p 차이가 있습니다. 원본 체크포인트와 전체 환경이 없어 정확한 재현은 확인하지 못했습니다. 같은 재학습 모델을 원본 `predict_many`와 서버로 실행한 결과는 최대 확률 차이가 0이며, `scripts/check_regression_prompt_parity.py --source 'C:\경로\All_in_one(regression)'`로 확인할 수 있습니다. 원본 함수의 재학습 모델 출력은 `tests/fixtures/regression_retrained_reference.json`에 보관합니다. 이는 연결 검증이며 정확도 평가가 아닙니다. 이전 모델용 `train_prompt_model.py`, `check_prompt_parity.py`도 유지합니다.
 
 Network 엔진은 `app/network_model.py`가 [`model/network`](../model/network/)의 XGBoost 모델(5분 구간)을 불러와 연결합니다. `NETWORK_ENGINE=stub`으로 서버를 시작하면 Network는 Stub을 씁니다.
 
 다른 엔진 연결은 `app/engines.py`의 `DataRiskEngine.analyze(request)`와 `NetworkRiskEngine.analyze(window)` 계약을 구현해 `create_app()`에 전달합니다.
 
-현재 프롬프트 모델은 AI·규칙 잠정 라벨 기반 시범 모델이며 오탐 개선이나 실사용 성능 검증을 완료한 것이 아닙니다. 통합 등급 정책, 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
+현재 프롬프트 모델은 AI·규칙 잠정 라벨 기반 시범 모델이며 오탐 개선이나 실사용 성능 검증을 완료한 것이 아닙니다. 캡처/Flow 변환기, 프롬프트 로그 연계, 관리자 인증·권한은 후속 작업입니다. 생성형 AI 호출·차단·제어 명령 API는 없습니다.
 
 ## 이전 Gateway 버전에서 변경된 점
 

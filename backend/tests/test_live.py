@@ -31,7 +31,8 @@ def test_events_need_no_session_end_and_aggregate_deltas_once(tmp_path):
         second["occurred_at"] = "2026-10-04T10:00:01+09:00"
         second["bytes_sent"] = 50
         result = client.post("/api/v1/ingest/events", json=second).json()
-        for risk in result["results"][1:]:
+        company = client.get("/api/v1/company-windows/" + result["company_window_id"]).json()
+        for risk in [r for r in company["results"] if r["engine"] == "network"]:
             window = client.app.state.repository.get("window", risk["window_id"])
             assert window["features"]["session_count"] == 1
             assert window["features"]["request_count"] == 2
@@ -68,12 +69,14 @@ def test_fast_data_result_visible_before_slow_network_finishes(tmp_path):
                     if row.get("results"):
                         break
                     time.sleep(0.01)
-                assert row["processing_state"] == "processing"
+                assert row["processing_state"] == "finished"  # 개별 프롬프트 작업은 종료됨
                 assert [r["engine"] for r in row["results"]] == ["data"]
                 assert not job.done()
                 screen = client.get("/api/v1/dashboard/events").json()["events"][0]
                 assert len(screen["prompt_reasons"]) == 4
                 assert screen["network_reasons"] == []
+                company = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
+                assert company["processing_state"] == "processing" and company["score"] is None
             finally:
                 release.set()
             assert job.result().json()["processing_state"] == "finished"
@@ -99,8 +102,8 @@ def test_retry_after_partial_commit_preserves_first_result(tmp_path, monkeypatch
     final = ingest(repo, body, StubDataRiskEngine(), StubNetworkRiskEngine())
     assert final["processing_state"] == "finished"
     assert first_id in {r["id"] for r in final["results"]}
-    assert len(repo.list("risk")) == 3
-    assert len(repo.list("window")) == 2
+    assert len(repo.list("risk")) == 2
+    assert len(repo.list("window")) == 1
 
 
 def test_stream_initial_change_cross_repository_and_disconnect(tmp_path):
@@ -118,12 +121,13 @@ def test_stream_initial_change_cross_repository_and_disconnect(tmp_path):
         await asyncio.to_thread(ingest, other, EventIngest.model_validate(observation()).as_capture(),
                                 StubDataRiskEngine(), StubNetworkRiskEngine())
         message = await asyncio.wait_for(anext(stream), 2)
-        assert '"revision":4' in message
+        assert f'"revision":{repo.revision()}' in message
+        assert repo.revision() > 0
         assert "PRIVATE_PROMPT" not in message and "employee-1" not in message
         request.disconnected = True
         assert await anext(stream, None) is None
         # 새 연결은 Last-Event-ID와 상관없이 현재 상태 재조회 신호를 받습니다.
         again = changes(repo, Request())
-        assert '"revision":4' in await anext(again)
+        assert f'"revision":{repo.revision()}' in await anext(again)
         await again.aclose()
     asyncio.run(check())

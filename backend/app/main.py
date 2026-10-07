@@ -1,6 +1,8 @@
 # FDS 서버의 시작 지점입니다. 실행: uvicorn app.main:app --port 8000
 # HTTP 주소는 api.py, 실제 수집·분석 흐름은 collection.py에서 정의합니다.
 import os
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from .api import router
 from .engines import DataRiskEngine, NetworkRiskEngine, StubNetworkRiskEngine
 from .prompt_engine import configured_data_engine
 from .repository import ConflictError, ReferenceError, Repository
+from .company import refresh_dirty
 
 
 def default_network_engine() -> NetworkRiskEngine:
@@ -28,7 +31,7 @@ def create_app(
     data_engine: DataRiskEngine | None = None,
     network_engine: NetworkRiskEngine | None = None,
 ) -> FastAPI:
-    # 기본은 All_in_one 프롬프트 모델입니다. 다른 엔진을 주입하거나 PROMPT_ENGINE=stub으로 시험할 수 있습니다.
+    # 기본은 Regression 프롬프트 모델입니다. 다른 엔진을 주입하거나 PROMPT_ENGINE=stub으로 시험할 수 있습니다.
     default_path = Path(__file__).resolve().parents[1] / "data" / "passive-fds.sqlite3"
     repo = Repository(database_path or Path(os.getenv("DATABASE_PATH", str(default_path))))
 
@@ -37,10 +40,29 @@ def create_app(
         # 서버 시작 때 한 번 실행됩니다. yield 이후 구간에는 향후 모델·연결 정리 코드를 둘 수 있습니다.
         repo.initialize()
         app.state.data_engine = data_engine if data_engine is not None else configured_data_engine()
-        yield
+        repo.migrate_company_windows()
+        stop = asyncio.Event()
+
+        async def maintain_windows():
+            while not stop.is_set():
+                try:
+                    await asyncio.to_thread(refresh_dirty, repo, app.state.network_engine)
+                except Exception:
+                    logging.getLogger(__name__).exception("Company window refresh failed; retrying")
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=1)
+                except TimeoutError:
+                    pass
+
+        worker = asyncio.create_task(maintain_windows())
+        try:
+            yield
+        finally:
+            stop.set()
+            await worker
 
     app = FastAPI(
-        title="Out-of-Path FDS 분석 서버", version="0.5.0", lifespan=lifespan,
+        title="Out-of-Path FDS 분석 서버", version="0.6.0", lifespan=lifespan,
         description="캡처 복사본의 수집·사후 분석·조회 전용. AI 요청 전달과 허용·차단을 수행하지 않습니다.",
     )
     app.state.repository = repo

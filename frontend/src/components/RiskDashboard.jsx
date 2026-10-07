@@ -61,21 +61,11 @@ const PROMPT_ITEMS = [
   { code: "PROMPT_INJECTION", label: "모델 교란", base: 42, details: { normal: "미탐지", caution: "특수 지시어 패턴 일부 포함", danger: "정책 우회 시도(지시 무시 요청) 감지" } },
 ];
 
-const INTENSITY = { normal: 0.15, caution: 0.5, warning: 0.75, danger: 1 };
-
 function buildItems(catalog, states = {}) {
-  const raw = catalog.map((c) => {
+  return catalog.map((c) => {
     const status = states[c.code] || "normal";
-    return { c, status, v: c.base * INTENSITY[status] };
+    return { code: c.code, label: c.label, status, detail: c.details[status] ?? c.details.caution };
   });
-  const total = raw.reduce((a, r) => a + r.v, 0) || 1;
-  return raw.map((r) => ({
-    code: r.c.code,
-    label: r.c.label,
-    status: r.status,
-    detail: r.c.details[r.status] ?? r.c.details.caution, // 경고 문구는 주의 문구로 대체
-    weight: Math.round((r.v / total) * 100),
-  }));
 }
 
 /* 데모 시나리오 — 근거(states)와 점수가 항상 일치하도록 프레임 단위로 손으로 정의.
@@ -159,7 +149,8 @@ function seedMockHistory() {
 // 요약도 내부 FDS API에서 저장된 결과로 만듭니다. 외부 LLM으로 데이터를 보내지 않습니다.
 async function explainEvent(event) {
   if (USE_MOCK) return { text: buildFallbackSummary(event), source: "demo" };
-  const res = await fetch(`${API_BASE}/api/v1/dashboard/explanation?capture_id=${encodeURIComponent(event.id)}`);
+  const key = event.scope === "company" ? "window_id" : "capture_id";
+  const res = await fetch(`${API_BASE}/api/v1/dashboard/explanation?${key}=${encodeURIComponent(event.id)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -260,7 +251,7 @@ function formatDuration(ms) {
 function sortItems(items) {
   const strength = (i) => i.probability ?? (i.score != null ? i.score / 100 : 0);
   return [...items].sort(
-    (a, b) => LEVELS[viewStatus(b)].rank - LEVELS[viewStatus(a)].rank || strength(b) - strength(a) || (b.weight ?? 0) - (a.weight ?? 0)
+    (a, b) => LEVELS[viewStatus(b)].rank - LEVELS[viewStatus(a)].rank || strength(b) - strength(a)
   );
 }
 
@@ -334,17 +325,12 @@ function EvidenceItem({ item, compact = false }) {
         {item.detail && <span className="evidence-item__detail">{item.detail.replace(LABEL_TAIL, "")}</span>}
         {item.probability != null && (
           <span className="evidence-item__metric-line" style={{ color }}>
-            모델 확률 {(item.probability * 100).toFixed(1)}% · 판정 기준 {(item.threshold * 100).toFixed(1)}% 초과
+            모델 확률 {(item.probability * 100).toFixed(1)}%
+            {item.detection_method === 'argmax' ? ' · 최다 확률 클래스 기준' : item.threshold != null ? ` · 판정 기준 ${(item.threshold * 100).toFixed(1)}% 초과` : ''}
           </span>
         )}
-        {item.probability == null && item.score != null && item.weight == null && !/확률\s*[\d.]+%/.test(item.detail ?? "") && (
+        {item.probability == null && item.score != null && !/확률\s*[\d.]+%/.test(item.detail ?? "") && (
           <span className="evidence-item__metric-line" style={{ color }}>항목 점수 {formatScore(item.score)}/100</span>
-        )}
-        {item.weight != null && (
-          <div className="weight-bar">
-            <div className="weight-bar__fill" style={{ width: `${item.weight}%`, background: color }} />
-            <span className="weight-bar__label">기여도 {item.weight}%</span>
-          </div>
         )}
       </div>
     </li>
@@ -790,7 +776,7 @@ export default function RiskDashboard() {
   }
 
   function exportCsv() {
-    const header = ["캡처ID", "세션ID", "사용자", "단말", "점수", "등급", "강제위험", "예측신뢰도", "관측시간"];
+    const header = ["구간ID", "참조ID", "집계대상", "집계범위", "점수", "등급", "강제위험", "예측신뢰도", "구간시작", "집계상태", "프롬프트최고점수", "최고점수캡처ID", "네트워크점수"];
     const rows = filtered.map((s) => [
       s.id,
       s.sessionId ?? s.id,
@@ -801,6 +787,10 @@ export default function RiskDashboard() {
       s.override ? "Y" : "",
       s.confidence == null ? "" : `${s.confidence}%`,
       s.connectedAt,
+      s.phase === "open" ? "잠정" : "종료",
+      s.prompt_max_score ?? "",
+      s.prompt_source_capture_id ?? "",
+      s.network_score ?? "",
     ]);
     const csv = [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -1036,9 +1026,6 @@ export default function RiskDashboard() {
         .evidence-item__metric-line { font-size: 12.5px; font-weight: 600; margin-top: 3px; }
         .evidence-note { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line, #E3E5EC); font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
         .evidence-item__chip { font-size: 11.5px; border: 1px solid; border-radius: 20px; padding: 1px 9px; flex-shrink: 0; }
-        .weight-bar { position: relative; margin-top: 7px; height: 4px; background: #E9EAF0; border-radius: 4px; }
-        .weight-bar__fill { height: 100%; border-radius: 4px; opacity: .9; transition: width .4s ease; }
-        .weight-bar__label { position: absolute; right: 0; top: 7px; font-size: 11px; color: var(--text-dim); }
         .list-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 6px; font-size: 12px; color: var(--text-dim); text-align: center; }
         .list-more button { background: var(--tint); border: 1px solid var(--line, #E3E5EC); border-radius: 8px; color: var(--accent); font-size: 12.5px; padding: 7px 14px; cursor: pointer; }
         .list-more button:disabled { opacity: .6; cursor: default; }
@@ -1110,7 +1097,7 @@ export default function RiskDashboard() {
             <Radio size={17} color="#33429A" />
           </div>
           <div>
-            네트워크·프롬프트 사후 분석
+            회사 전체 · 5분 구간 위험도
             <div className="dash-header__sub">
               <span className={`live-dot ${dotClass}`} />
               {statusText} · 최근 {events.length} / 전체 {total}건
@@ -1163,8 +1150,8 @@ export default function RiskDashboard() {
             <div className="search-box">
               <Search size={14} color="#8B8F99" />
               <input
-                placeholder="사용자·캡처/세션ID·단말 검색"
-                aria-label="세션 검색"
+                placeholder="5분 구간 ID 검색"
+                aria-label="구간 검색"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -1212,7 +1199,7 @@ export default function RiskDashboard() {
               {filtered.length === 0 && (
                 <div className="list-empty">
                   <Inbox size={26} />
-                  <span>{events.length ? "조건에 맞는 세션이 없어요" : "표시할 세션이 없어요"}</span>
+                  <span>{events.length ? "조건에 맞는 구간이 없어요" : "표시할 구간이 없어요"}</span>
                   {events.length > 0 && <button onClick={resetFilters}>필터 초기화</button>}
                 </div>
               )}
@@ -1258,7 +1245,7 @@ export default function RiskDashboard() {
         {status === "ok" && !selected && (
           <div className="state-panel">
             <Inbox size={30} />
-            <b>{events.length ? "조건에 맞는 캡처가 없습니다." : "수집된 캡처가 없습니다."}</b>
+            <b>{events.length ? "조건에 맞는 구간이 없습니다." : "수집된 구간이 없습니다."}</b>
             <span>수집기가 관측 자료를 전송하면 자동으로 표시됩니다.</span>
           </div>
         )}
@@ -1270,7 +1257,7 @@ export default function RiskDashboard() {
                 <User size={14} /> <b>{selected.user}</b> · {selected.dept}
               </span>
               <span className="detail-meta__item">
-                <Network size={14} /> 세션 ID <b>{selected.sessionId ?? selected.id}</b>
+                <Network size={14} /> {selected.scope === "company" ? "구간 ID" : "세션 ID"} <b>{selected.sessionId ?? selected.id}</b>
               </span>
               <span className="detail-meta__item">
                 <Clock size={14} /> 관측 {selected.connectedAt}
@@ -1279,6 +1266,17 @@ export default function RiskDashboard() {
                 </>}
               </span>
             </div>
+
+            {selected.scope === "company" && (
+              <div className="llm-box" role="note">
+                <b>{selected.phase === "open" ? "집계 중 · 잠정 점수" : "종료된 5분 구간"}</b>
+                <p>{selected.connectedAt} ~ {new Date(selected.endedAtMs).toLocaleTimeString("ko-KR", { hour12: false })} (끝 시각 제외)</p>
+                <p>프롬프트 최고 {formatScore(selected.prompt_max_score)}/60 + 네트워크 {formatScore(selected.network_score)} × 0.4 = {formatScore(selected.score)}/100</p>
+                {selected.prompt_source_capture_id && <p>최고 점수 근거: {selected.prompt_source_capture_id} · 사용자 {selected.prompt_source_user_id}</p>}
+                <p>{selected.reason}</p>
+                <p>회사 전체 구간의 위험도입니다. 개인 등급이 아니며, 늦게 도착한 기록이 있으면 갱신됩니다.</p>
+              </div>
+            )}
 
             <div className="detail-main">
               <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />
@@ -1292,7 +1290,7 @@ export default function RiskDashboard() {
               </div>}
               {selected.score == null && selected.isReal && (
                 <div className="trend-card trend-card--note">
-                  <div className="trend-card__title">통합 등급 미연결</div>
+                  <div className="trend-card__title">통합 등급 미판정</div>
                   <p>통합 점수·등급은 아직 계산되지 않았습니다. <b>미판정·미탐지는 안전 판정이 아닙니다.</b> 아래는 엔진별 개별 결과입니다.</p>
                 </div>
               )}
@@ -1312,7 +1310,7 @@ export default function RiskDashboard() {
 
             <div className="evidence-cols">
               <EvidenceGroup
-                title="Network Risk Engine 탐지 (N1~N6)"
+                title="회사 전체 네트워크 · 5분 집계 (N1~N6)"
                 icon={<Network size={15} color="#5F6372" />}
                 items={selected.network_reasons}
                 accent="#33429A"
@@ -1321,7 +1319,7 @@ export default function RiskDashboard() {
                 onToggle={() => setOpenSafe((s) => ({ ...s, net: !s.net }))}
               />
               <EvidenceGroup
-                title="Data Risk Engine 탐지"
+                title="구간 내 최고 점수 프롬프트 분석"
                 icon={<MessageSquareWarning size={15} color="#5F6372" />}
                 items={selected.prompt_reasons}
                 accent="#7A4FB5"

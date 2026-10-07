@@ -54,6 +54,16 @@ def test_finding_layout_and_unscorable_windows(engine):
     assert engine.analyze(window_from(empty)).findings[0].code == "network_model"
 
 
+def test_model_loads_from_unicode_directory(tmp_path, engine):
+    artifacts = tmp_path / "한글 모델 경로"
+    artifacts.mkdir()
+    for name in ("model_meta.json", "xgb_network_model.json"):
+        (artifacts / name).write_bytes((ARTIFACTS / name).read_bytes())
+    loaded = engine.inference.NetworkRiskEngine.load(artifacts)
+    frame = pd.read_csv(ARTIFACTS / "test_features.csv").iloc[:1]
+    pd.testing.assert_frame_equal(loaded.score(frame), engine.model.score(frame))
+
+
 def test_window_features_follow_training_definitions():
     t0 = datetime(2026, 10, 6, 20, 0, tzinfo=KST)  # 업무시간 외
 
@@ -101,17 +111,19 @@ def test_ingested_events_are_scored_end_to_end(tmp_path, engine):
             response = client.post("/api/v1/ingest/events", json=body)
             assert response.status_code == 200
             assert client.post("/api/v1/ingest/events", json=body).json() == response.json()  # 재전송
-        results = {r["window_id"]: r for r in response.json()["results"] if r["engine"] == "network"}
+        group = client.get("/api/v1/company-windows/" + response.json()["company_window_id"]).json()
+        results = {r["window_id"]: r for r in group["results"] if r["engine"] == "network"}
         windows = {wid: client.app.state.repository.get("window", wid) for wid in results}
         by_minutes = {w["duration_minutes"]: results[wid] for wid, w in windows.items()}
         assert by_minutes[5]["status"] == "complete" and 0 <= by_minutes[5]["score"] <= 100
-        assert by_minutes[60]["status"] == "pending"
+        assert set(by_minutes) == {5}
         assert windows[by_minutes[5]["window_id"]]["model_features"]["request_count"] == 3
         # 프롬프트·AI 로그 없는 패킷 메타데이터만으로는 미판정입니다.
         metadata_only = client.post("/api/v1/ingest/events", json=dict(
             id="meta-1", session_id="m", user_id="u2", device_id="pc2", destination="x.ai",
-            occurred_at=base.isoformat(), source="collector", bytes_sent=10)).json()
-        assert {r["status"] for r in metadata_only["results"] if r["engine"] == "network"} == {"pending"}
+            occurred_at=(base + timedelta(minutes=5)).isoformat(), source="collector", bytes_sent=10)).json()
+        metadata_group = client.get("/api/v1/company-windows/" + metadata_only["company_window_id"]).json()
+        assert {r["status"] for r in metadata_group["results"] if r["engine"] == "network"} == {"pending"}
         assert client.post("/api/v1/ingest/events", json=dict(
             id="bad", session_id="m", user_id="u2", device_id="pc2", destination="x.ai",
             occurred_at=base.isoformat(), source="collector", tenant="company")).status_code == 422
