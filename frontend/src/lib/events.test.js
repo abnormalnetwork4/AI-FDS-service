@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore } from './events.js';
+import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem } from './events.js';
 
 test('classification probability is displayed separately from risk score and overall safety', () => {
   const row = normalizeEvent({ id: 'classified', prompt_reasons: [
@@ -126,4 +126,28 @@ test('pagination reads 200-row pages by offset, merges, de-duplicates and caps p
   assert.equal(capped.length, 10);
   await assert.rejects(fetchEventPage('', undefined, async (url) =>
     url.includes('offset=200') ? { ok: false, status: 500 } : { ok: true, json: async () => ({ events: [], total: 0 }) }, 2), /500/);
+});
+
+test('notable items: data detections and high-probability network items are surfaced, quiet ones fold', () => {
+  const row = normalizeEvent({ id: 'n', network_reasons: [
+    { code: 'N1', status: 'complete', score: 98.4, detail: '모델 확률 98.4% · 판정 위협' },
+    { code: 'N2', status: 'complete', score: 0, detail: '모델 확률 0.0%' },
+    { code: 'network_score', status: 'complete', score: 69.7, detail: '기본 50 + 모델 확신도' },
+    { code: 'network_model', status: 'pending', score: null, detail: '미판정' },
+    { code: 'N3', status: 'complete', score: 12, detail: '모델 확률 12.0% · 판정 위험' },
+    { code: 'N4', status: 'error', score: null, detail: '' },
+  ], prompt_reasons: [
+    { code: 'AI_steal', status: 'complete', detected: true, probability: .9, threshold: .5 },
+    { code: 'abuse_act', status: 'complete', detected: false, probability: .12, threshold: .5 },
+  ] });
+  const hits = [...row.network_reasons, ...row.prompt_reasons].filter(isNotable).map((i) => i.code);
+  assert.deepEqual(hits, ['N1', 'N3', 'AI_steal']); // network_score는 요약 행이라 탐지에서 제외
+  assert.equal(isSummaryItem(row.network_reasons[2]), true);
+  assert.equal(isSummaryItem(row.network_reasons[3]), true);
+  assert.equal(viewStatus(row.network_reasons[0]), 'detected');
+  assert.equal(viewStatus(row.network_reasons[1]), 'complete');
+  assert.equal(viewStatus(row.network_reasons[2]), 'complete'); // 요약 행은 '탐지'로 표시하지 않음
+  assert.equal(viewStatus(row.prompt_reasons[1]), 'not_detected');
+  assert.equal(isNotable(row.network_reasons[3]), false); // 미판정은 탐지가 아님
+  assert.equal(isNotable(row.network_reasons[5]), false); // 오류는 별도 표시
 });
