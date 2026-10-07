@@ -12,6 +12,20 @@ export const LEVELS = {
   not_detected: { label: '미탐지', color: '#33429A', rank: 0 },
 };
 
+// 개별 엔진이 '탐지'로 본 항목인지 판단합니다(통합 등급과 무관). Data는 detected, Network는 항목 점수(모델 확률) 50% 이상이거나
+// 서버 문구에 '판정 위협/위험'이 있을 때입니다. 백엔드가 Network 항목에도 detected를 주면 이 문구 검사는 지워도 됩니다.
+const NETWORK_HIT = /판정\s*위[협험]/;
+// network_score(종합 점수)·network_model(모델 상태)은 개별 탐지 항목이 아니라 네트워크 엔진의 요약 행입니다.
+const SUMMARY_CODES = ['network_score', 'network_model'];
+export const isSummaryItem = (item) => SUMMARY_CODES.includes(item.code);
+export function isNotable(item) {
+  if (isSummaryItem(item)) return false;
+  if (['detected', 'danger', 'warning', 'caution'].includes(item.status)) return true;
+  return item.status === 'complete' && ((item.score ?? 0) >= 50 || NETWORK_HIT.test(item.detail ?? ''));
+}
+// 화면 표시용 상태. 탐지로 본 Network 항목은 '분석 완료'가 아니라 '탐지'로 보여 줍니다.
+export const viewStatus = (item) => item.status === 'complete' && isNotable(item) ? 'detected' : item.status;
+
 export function nullableScore(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
 }

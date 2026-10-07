@@ -1,4 +1,4 @@
-import { LEVELS, MAX_PAGES, PAGE_SIZE, eventLevel, fetchEventPage, formatScore, shouldNotify } from "../lib/events.js";
+import { LEVELS, MAX_PAGES, PAGE_SIZE, eventLevel, fetchEventPage, formatScore, isNotable, isSummaryItem, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -258,15 +258,15 @@ function formatDuration(ms) {
 
 // 심각도 → 기여도 순 정렬 (위험한 항목이 위로)
 function sortItems(items) {
+  const strength = (i) => i.probability ?? (i.score != null ? i.score / 100 : 0);
   return [...items].sort(
-    (a, b) => LEVELS[b.status].rank - LEVELS[a.status].rank || b.weight - a.weight
+    (a, b) => LEVELS[viewStatus(b)].rank - LEVELS[viewStatus(a)].rank || strength(b) - strength(a) || (b.weight ?? 0) - (a.weight ?? 0)
   );
 }
 
+// 개별 엔진이 탐지한 항목(통합 등급과 별개). 실데이터·데모 모두 같은 기준을 씁니다.
 function topContributors(event, n = 3) {
-  return sortItems([...event.network_reasons, ...event.prompt_reasons])
-    .filter((i) => ["danger", "warning", "caution"].includes(i.status))
-    .slice(0, n);
+  return sortItems([...event.network_reasons, ...event.prompt_reasons]).filter(isNotable).slice(0, n);
 }
 
 function buildFallbackSummary(e) {
@@ -302,41 +302,63 @@ function StatusIcon({ status, size = 15 }) {
   return <ShieldCheck size={size} color={LEVELS.normal.color} />;
 }
 
-function EvidenceItem({ item }) {
+const LABEL_TAIL = /\s*라벨 설명이며 개별 판단 근거는 미제공\.?\s*$/; // 모든 Data 항목에 반복되는 꼬리 문구는 그룹 안내로 한 번만 보여 줍니다.
+
+function EvidenceItem({ item, compact = false }) {
+  const status = viewStatus(item);
+  const { color, label } = LEVELS[status];
+  const metric = item.probability != null
+    ? `확률 ${(item.probability * 100).toFixed(1)}%`
+    : item.score != null ? `${formatScore(item.score)}점` : "";
+  if (compact) {
+    return (
+      <li className="evidence-item evidence-item--compact">
+        <StatusIcon status={status} size={13} />
+        <span className="evidence-item__code">{item.code}</span>
+        <span className="evidence-item__short">{item.label}</span>
+        <span className="evidence-item__metric">{metric}</span>
+      </li>
+    );
+  }
   return (
-    <li className="evidence-item">
-      <StatusIcon status={item.status} />
+    <li className="evidence-item evidence-item--hit" style={{ borderLeftColor: color }}>
+      <StatusIcon status={status} />
       <div className="evidence-item__text">
         <div className="evidence-item__row">
           <span className="evidence-item__label">
             <span className="evidence-item__code">{item.code}</span>
             {item.label}
           </span>
-          <span
-            className="evidence-item__chip"
-            style={{ color: LEVELS[item.status].color, borderColor: LEVELS[item.status].color }}
-          >
-            {LEVELS[item.status].label}
-          </span>
+          <span className="evidence-item__chip" style={{ color, borderColor: color }}>{label}</span>
         </div>
-        <span className="evidence-item__detail">{item.detail}</span>
-        {item.probability != null && <span className="evidence-item__detail">
-          모델 예측 확률 {(item.probability * 100).toFixed(1)}% · 판정 기준 {(item.threshold * 100).toFixed(1)}% 초과 (위험도 점수 아님)
-        </span>}
-        {item.weight != null ? <div className="weight-bar">
-          <div className="weight-bar__fill" style={{ width: `${item.weight}%`, background: LEVELS[item.status].color }} />
-          <span className="weight-bar__label">기여도 {item.weight}%</span>
-        </div> : <span className="evidence-item__detail">{item.score == null ? "점수 미제공" : `항목 점수 ${item.score}/100 (통합 기여도 아님)`}</span>}
+        {item.detail && <span className="evidence-item__detail">{item.detail.replace(LABEL_TAIL, "")}</span>}
+        {item.probability != null && (
+          <span className="evidence-item__metric-line" style={{ color }}>
+            모델 확률 {(item.probability * 100).toFixed(1)}% · 판정 기준 {(item.threshold * 100).toFixed(1)}% 초과
+          </span>
+        )}
+        {item.probability == null && item.score != null && item.weight == null && !/확률\s*[\d.]+%/.test(item.detail ?? "") && (
+          <span className="evidence-item__metric-line" style={{ color }}>항목 점수 {formatScore(item.score)}/100</span>
+        )}
+        {item.weight != null && (
+          <div className="weight-bar">
+            <div className="weight-bar__fill" style={{ width: `${item.weight}%`, background: color }} />
+            <span className="weight-bar__label">기여도 {item.weight}%</span>
+          </div>
+        )}
       </div>
     </li>
   );
 }
 
-function EvidenceGroup({ title, icon, items, accent, expanded, onToggle }) {
+function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggle, note }) {
+  const summary = allItems.filter(isSummaryItem);
+  const items = allItems.filter((i) => !isSummaryItem(i));
   const sorted = sortItems(items);
-  const risky = sorted.filter((i) => i.status !== "normal");
-  const normal = sorted.filter((i) => i.status === "normal");
-  const visible = expanded ? sorted : risky;
+  const shown = sorted.filter((i) => isNotable(i) || i.status === "error");
+  const folded = sorted.filter((i) => !shown.includes(i));
+  const pending = items.filter((i) => i.status === "pending").length;
+  const rows = expanded ? sorted : shown;
 
   return (
     <div className="evidence-group" style={{ borderLeftColor: accent }}>
@@ -344,21 +366,35 @@ function EvidenceGroup({ title, icon, items, accent, expanded, onToggle }) {
         {icon}
         <span>{title}</span>
         <span className="evidence-group__count">
-          전체 {items.length}개 · 미분석 {items.filter((i) => i.status === "pending").length}개
+          탐지 {items.filter(isNotable).length}개 · 전체 {items.length}개{pending > 0 && ` · 미분석 ${pending}개`}
         </span>
       </div>
-      {visible.length === 0 && <div className="evidence-empty">{items.length ? "표시할 추가 항목이 없습니다." : "분석 결과가 아직 없습니다."}</div>}
+      {items.length === 0 && <div className="evidence-empty">분석 결과가 아직 없습니다.</div>}
+      {items.length > 0 && shown.length === 0 && <div className="evidence-empty">탐지된 항목이 없습니다.</div>}
       <ul className="evidence-list">
-        {visible.map((item) => (
-          <EvidenceItem key={item.id ?? item.code} item={item} />
+        {rows.map((item) => (
+          <EvidenceItem key={item.id ?? item.code} item={item} compact={!(isNotable(item) || item.status === "error")} />
         ))}
       </ul>
-      {normal.length > 0 && (
+      {folded.length > 0 && (
         <button className="collapse-btn" onClick={onToggle}>
           <ChevronDown size={13} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
-          {expanded ? "정상 항목 접기" : `정상 ${normal.length}개 항목 보기`}
+          {expanded ? "탐지 없는 항목 접기" : `탐지 없는 ${folded.length}개 항목 보기`}
         </button>
       )}
+      {summary.length > 0 && (
+        <details className="evidence-summary">
+          <summary>네트워크 종합·모델 상태 ({summary.length})</summary>
+          {summary.map((i) => (
+            <div key={i.id ?? i.code} className="evidence-summary__row">
+              <span className="evidence-item__code">{i.code}</span> {i.label}
+              {i.score != null && <b> · {formatScore(i.score)}/100</b>}
+              {i.detail && <p>{i.detail}</p>}
+            </div>
+          ))}
+        </details>
+      )}
+      {note && <div className="evidence-note">{note}</div>}
     </div>
   );
 }
@@ -368,15 +404,17 @@ function TopIssues({ event }) {
   return (
     <div className="top-issues">
       <span className="top-issues__title">
-        <Flame size={14} /> {event.isReal ? "통합 판정 상태" : `핵심 원인 TOP ${top.length || 3}`}
+        <Flame size={14} /> {event.isReal ? "개별 엔진 탐지" : `핵심 원인 TOP ${top.length || 3}`}
       </span>
       {top.length === 0 ? (
-        <span className="top-issues__none">{event.isReal ? event.reason : "특이 징후 없음 · 데모 판정"}</span>
+        <span className="top-issues__none">
+          {event.isReal ? "탐지된 항목 없음" : "특이 징후 없음 · 데모 판정"}
+        </span>
       ) : (
         <div className="top-issues__chips">
           {top.map((t, i) => (
-            <span key={t.code} className="issue-chip" style={{ borderColor: LEVELS[t.status].color }}>
-              <b style={{ color: LEVELS[t.status].color }}>{i + 1}</b>
+            <span key={t.code} className="issue-chip" style={{ borderColor: LEVELS[viewStatus(t)].color }}>
+              <b style={{ color: LEVELS[viewStatus(t)].color }}>{i + 1}</b>
               <span className="issue-chip__code">{t.code}</span>
               {t.label}
             </span>
@@ -391,7 +429,7 @@ function RiskScoreBadge({ score, level }) {
   const { color, label } = LEVELS[level];
   const circumference = 2 * Math.PI * 54;
   const offset = circumference - ((score ?? 0) / 100) * circumference;
-  const unit = score != null ? "/ 100" : level === "pending" ? "미판정 · 안전 판정 아님" : "점수 미제공";
+  const unit = score != null ? "/ 100" : "";
 
   return (
     <div className="score-badge">
@@ -422,7 +460,7 @@ function RiskScoreBadge({ score, level }) {
 
 // 예측 신뢰도 — 위험도 색(빨강/주황/초록)과 겹치지 않도록 파랑 계열 + 낮음은 빗금 패턴으로 표현
 function ConfidenceMeter({ confidence }) {
-  if (confidence == null) return <div className="confidence-card"><div className="confidence-card__title">예측 신뢰도</div><div className="confidence-card__num">—</div><div className="confidence-card__tier">모델에서 미제공</div></div>;
+  if (confidence == null) return <div className="confidence-card"><div className="confidence-card__title">예측 신뢰도</div><div className="confidence-card__num">—</div><div className="confidence-card__tier">미제공</div></div>;
   const tier = confidence >= 80 ? "높음" : confidence >= 60 ? "보통" : "낮음";
   const textColor = confidence >= 80 ? "#33429A" : "#5A6072";
   const fillStyle =
@@ -454,6 +492,8 @@ function ConfidenceMeter({ confidence }) {
 function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
   const level = eventLevel(session);
   const { color } = LEVELS[level];
+  const hits = session.isReal ? topContributors(session, 1) : [];
+  const hitCount = session.isReal ? [...session.network_reasons, ...session.prompt_reasons].filter(isNotable).length : 0;
   return (
     <button
       className={`session-row ${active ? "session-row--active" : ""} ${flashing ? "session-row--flash" : ""}`}
@@ -465,9 +505,13 @@ function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
       <span className="session-row__dot" style={{ background: color }} />
       <div className="session-row__main">
         <span className="session-row__user">{session.user}</span>
-        <span className="session-row__meta">
-          {session.sessionId ?? session.id} · {session.connectedAt}
-        </span>
+        <span className="session-row__meta session-row__id" title={session.sessionId ?? session.id}>{session.sessionId ?? session.id}</span>
+        <span className="session-row__meta">{session.connectedAt}</span>
+        {hits.length > 0 && (
+          <span className="session-row__find" style={{ color: LEVELS[viewStatus(hits[0])].color }}>
+            탐지 {hits[0].code} {hits[0].label.replace(/\s*·\s*\d+분 집계$/, "")}{hitCount > 1 ? ` 외 ${hitCount - 1}건` : ""}
+          </span>
+        )}
       </div>
       <span className="session-row__score" style={{ color, transition: "color 0.6s ease" }}>{session.score != null ? formatScore(session.score) : LEVELS[level].label}</span>
       <ChevronRight size={16} color="#B7BAC3" />
@@ -787,6 +831,7 @@ export default function RiskDashboard() {
     }
   }
 
+  const [exOpen, setExOpen] = useState({});
   const ex = selected ? llm[selected.id] : null;
   const exLoading = ex?.status === "loading";
   const exStale =
@@ -824,7 +869,9 @@ export default function RiskDashboard() {
           border-radius: 14px;
           border: 1px solid var(--border);
           overflow: hidden;
-          min-height: 680px;
+          box-sizing: border-box;
+          height: 100vh; height: 100dvh; /* 화면 높이에 맞추고, 남는 공간을 본문이 채워 좌우가 각각 스크롤됩니다 */
+          min-height: 560px;
           display: flex;
           flex-direction: column;
           box-shadow: 0 1px 2px rgba(20,22,30,0.04);
@@ -887,10 +934,16 @@ export default function RiskDashboard() {
         }
         .stale-banner button { margin-left: auto; background: #fff; border: 1px solid #EFC1BC; color: #8E2A20; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 
+        /* 본문은 남는 높이를 채우고, 왼쪽 목록·오른쪽 상세가 각각 스크롤됩니다(페이지 전체가 같이 스크롤되지 않게). */
+        .dash > :not(.dash-body) { flex-shrink: 0; }
         .dash-body { display: flex; flex: 1; min-height: 0; }
+        .tester-fold { border-bottom: 1px solid var(--border); background: #fafbff; }
+        .tester-fold > summary { cursor: pointer; padding: 9px 24px; font-size: 12.5px; font-weight: 500; color: var(--accent); }
+        .tester-fold[open] > summary { border-bottom: 1px dashed var(--border); }
+        .tester-fold .prompt-tester { border-bottom: none; max-height: 45vh; overflow-y: auto; }
 
-        .side { width: 320px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #FBFBFD; }
-        .filter-bar { padding: 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+        .side { width: 320px; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #FBFBFD; }
+        .filter-bar { flex-shrink: 0; padding: 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
         .search-box { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; }
         .search-box input { background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; width: 100%; }
         .search-box input:focus-visible { outline: none; }
@@ -898,12 +951,15 @@ export default function RiskDashboard() {
         .filter-pills { display: flex; gap: 6px; }
         .filter-pill { flex: 1; padding: 7px 0; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); font-size: 12.5px; cursor: pointer; }
         .filter-pill--active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .tool-row { display: flex; gap: 8px; align-items: stretch; }
+        .tool-row .sort-select { flex: 1; min-width: 0; }
+        .tool-row .export-btn { flex-shrink: 0; white-space: nowrap; padding: 7px 11px; }
         .sort-select { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; font-size: 12.5px; color: var(--text-dim); }
         .sort-select select { background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; flex: 1; }
         .export-btn { display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 9px 0; font-size: 12.5px; color: var(--accent); cursor: pointer; font-weight: 500; }
         .export-btn:hover { background: var(--accent-soft); }
 
-        .session-list { overflow-y: auto; flex: 1; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
+        .session-list { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
         .session-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 9px; padding: 11px 12px; cursor: pointer; color: var(--text); }
         .session-row:hover { background: var(--panel); border-color: var(--border); }
         .session-row--active { background: var(--panel); border-color: var(--accent); box-shadow: 0 1px 3px rgba(20,22,30,.06); }
@@ -913,6 +969,8 @@ export default function RiskDashboard() {
         .session-row__main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
         .session-row__user { font-size: 13.5px; font-weight: 500; }
         .session-row__meta { font-size: 11.5px; color: var(--text-dim); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+        .session-row__id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-row__find { margin-top: 3px; font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .session-row__score { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14.5px; font-weight: 600; }
 
         .list-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; color: var(--text-dim); text-align: center; }
@@ -924,7 +982,7 @@ export default function RiskDashboard() {
         .hover-tooltip__conf { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-dim); font-family: 'Noto Sans KR', sans-serif; }
         .hover-tooltip__row { display: flex; align-items: flex-start; gap: 5px; color: var(--text-dim); margin-top: 4px; line-height: 1.45; }
 
-        .detail { flex: 1; padding: 24px 28px; overflow-y: auto; min-width: 0; }
+        .detail { flex: 1; padding: 24px 28px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; min-width: 0; }
         .detail-meta { display: flex; gap: 22px; margin-bottom: 22px; flex-wrap: wrap; }
         .detail-meta__item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); }
         .detail-meta__item b { color: var(--text); font-weight: 600; }
@@ -970,6 +1028,13 @@ export default function RiskDashboard() {
         .evidence-item__label { font-size: 13.5px; font-weight: 500; display: flex; align-items: center; gap: 7px; }
         .evidence-item__code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 700; border: 1px solid currentColor; border-radius: 4px; padding: 1px 5px; color: var(--accent); }
         .evidence-item__detail { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+        .evidence-item--hit { border-left: 3px solid; padding-left: 9px; }
+        .evidence-item--compact { align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); }
+        .evidence-item--compact .evidence-item__code { color: var(--text-dim); }
+        .evidence-item__short { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .evidence-item__metric { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; flex-shrink: 0; }
+        .evidence-item__metric-line { font-size: 12.5px; font-weight: 600; margin-top: 3px; }
+        .evidence-note { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line, #E3E5EC); font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
         .evidence-item__chip { font-size: 11.5px; border: 1px solid; border-radius: 20px; padding: 1px 9px; flex-shrink: 0; }
         .weight-bar { position: relative; margin-top: 7px; height: 4px; background: #E9EAF0; border-radius: 4px; }
         .weight-bar__fill { height: 100%; border-radius: 4px; opacity: .9; transition: width .4s ease; }
@@ -985,6 +1050,14 @@ export default function RiskDashboard() {
         .llm-btn { display: flex; align-items: center; gap: 6px; background: var(--accent); border: none; color: #fff; border-radius: 7px; padding: 8px 14px; font-size: 12.5px; cursor: pointer; font-weight: 500; }
         .llm-btn:hover { background: #2A3785; }
         .llm-btn:disabled { opacity: .55; cursor: default; }
+        .llm-text--clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+        .evidence-group, .session-row__main, .top-issues, .llm-text, .trend-card { word-break: keep-all; overflow-wrap: anywhere; }
+        .trend-card--note { min-width: 260px; }
+        .trend-card--note p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--text-dim); }
+        .evidence-summary { margin-top: 12px; font-size: 12.5px; color: var(--text-dim); }
+        .evidence-summary summary { cursor: pointer; color: var(--accent); }
+        .evidence-summary__row { margin-top: 8px; line-height: 1.5; }
+        .evidence-summary__row p { margin: 3px 0 0; font-size: 12px; }
         .llm-text { font-size: 13.5px; line-height: 1.7; color: var(--text); }
         .llm-hint { font-size: 12.5px; color: var(--text-dim); }
         .llm-meta { display: flex; gap: 8px; align-items: center; margin-top: 9px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
@@ -1013,6 +1086,7 @@ export default function RiskDashboard() {
           .trend-card { flex-basis: 100%; }
         }
         @media (max-width: 860px) {
+          .dash { height: auto; }
           .dash-body { flex-direction: column; }
           .side { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 340px; }
           .evidence-cols { flex-direction: column; }
@@ -1068,7 +1142,12 @@ export default function RiskDashboard() {
         </div>
       </div>
 
-      {!isMock && <PromptTester apiBase={API_BASE} />}
+      {!isMock && (
+        <details className="tester-fold">
+          <summary>프롬프트 직접 테스트</summary>
+          <PromptTester apiBase={API_BASE} />
+        </details>
+      )}
 
       {status === "error" && events.length > 0 && (
         <div className="stale-banner">
@@ -1110,17 +1189,20 @@ export default function RiskDashboard() {
                 </button>
               ))}
             </div>
-            <div className="sort-select">
-              <ArrowUpDown size={13} color="#8B8F99" />
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="정렬">
-                <option value="default">기본순</option>
-                <option value="score_desc">점수 높은순</option>
-                <option value="recent">최근 관측순</option>
-              </select>
+            <div className="tool-row">
+              <div className="sort-select">
+                <ArrowUpDown size={13} color="#8B8F99" />
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="정렬">
+                  <option value="default">기본순</option>
+                  <option value="score_desc">점수 높은순</option>
+                  <option value="recent">최근 관측순</option>
+                </select>
+              </div>
+              <button className="export-btn" onClick={exportCsv} disabled={!filtered.length}
+                title="현재 목록을 CSV로 내보내기" aria-label={`CSV 내보내기 (${filtered.length}건)`}>
+                <Download size={13} /> CSV ({filtered.length})
+              </button>
             </div>
-            <button className="export-btn" onClick={exportCsv} disabled={!filtered.length}>
-              <Download size={13} /> CSV 내보내기 ({filtered.length}건)
-            </button>
           </div>
 
           {status === "loading" ? (
@@ -1201,13 +1283,19 @@ export default function RiskDashboard() {
             <div className="detail-main">
               <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />
               <ConfidenceMeter confidence={selected.confidence} />
-              <div className="trend-card">
+              {(selected.score != null || !selected.isReal) && <div className="trend-card">
                 <div className="trend-card__title">화면 조회 중 점수 변화</div>
                 <ScoreTrendChart
                   history={history[selected.id] || [selected.score]}
                   color={LEVELS[eventLevel(selected)].color}
                 />
-              </div>
+              </div>}
+              {selected.score == null && selected.isReal && (
+                <div className="trend-card trend-card--note">
+                  <div className="trend-card__title">통합 등급 미연결</div>
+                  <p>통합 점수·등급은 아직 계산되지 않았습니다. <b>미판정·미탐지는 안전 판정이 아닙니다.</b> 아래는 엔진별 개별 결과입니다.</p>
+                </div>
+              )}
             </div>
 
             <TopIssues event={selected} />
@@ -1228,6 +1316,7 @@ export default function RiskDashboard() {
                 icon={<Network size={15} color="#5F6372" />}
                 items={selected.network_reasons}
                 accent="#33429A"
+                note="항목 점수는 모델 클래스 확률(%)이며 통합 기여도가 아닙니다."
                 expanded={openSafe.net}
                 onToggle={() => setOpenSafe((s) => ({ ...s, net: !s.net }))}
               />
@@ -1236,6 +1325,7 @@ export default function RiskDashboard() {
                 icon={<MessageSquareWarning size={15} color="#5F6372" />}
                 items={selected.prompt_reasons}
                 accent="#7A4FB5"
+                note="확률은 라벨 분류 결과이며 위험도 점수가 아닙니다. 항목별 판단 근거는 제공되지 않습니다. 미탐지는 안전 판정이 아닙니다."
                 expanded={openSafe.prompt}
                 onToggle={() => setOpenSafe((s) => ({ ...s, prompt: !s.prompt }))}
               />
@@ -1251,7 +1341,17 @@ export default function RiskDashboard() {
                   {exLoading ? "생성 중..." : ex?.status === "done" ? (exStale ? "최신 상태로 다시 생성" : "다시 생성") : "분석 요약 보기"}
                 </button>
               </div>
-              {ex?.status === "done" && <div className="llm-text">{ex.text}</div>}
+              {ex?.status === "done" && (
+                <>
+                  <div className={`llm-text ${exOpen[selected.id] ? "" : "llm-text--clamp"}`}>{ex.text}</div>
+                  {ex.text.length > 220 && (
+                    <button className="collapse-btn" onClick={() => setExOpen((o) => ({ ...o, [selected.id]: !o[selected.id] }))}>
+                      <ChevronDown size={13} style={{ transform: exOpen[selected.id] ? "rotate(180deg)" : "none" }} />
+                      {exOpen[selected.id] ? "요약 접기" : "전체 요약 보기"}
+                    </button>
+                  )}
+                </>
+              )}
               {ex?.status === "done" && (
                 <div className="llm-meta">
                   <span className="llm-tag">{ex.source === "stored" ? "저장 결과 요약" : ex.source === "demo" ? "데모 요약" : "화면 데이터 요약"}</span>
