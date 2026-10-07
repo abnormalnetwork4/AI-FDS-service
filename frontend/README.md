@@ -38,7 +38,8 @@ cd backend
 ## 화면 표시 기준
 
 - 사용자·단말별 고정 5분 구간 선택, 사용자·단말·구간 ID 검색, 등급 필터, 정렬, CSV 내보내기를 지원합니다.
-- 구간 상세의 "같은 시간대 사용자 구간" 표는 같은 5분 시간대의 다른 사용자 구간을 등급순으로 보여 주고, 클릭하면 그 구간으로 이동합니다. 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다(화면에 불러온 구간 기준. 서버 전체 집계는 `/api/v1/dashboard/company-slots`).
+- 왼쪽 위 **날짜(KST)·사용자 선택**으로 특정 날짜, 특정 사용자의 구간만 서버에서 다시 읽습니다. 날짜 목록은 `/dashboard/dates`, 사용자 목록은 `/dashboard/users?date=`(가장 높은 등급 순, 점수 합산 아님)에서 가져옵니다. 등급 필터·검색은 불러온 구간 안에서 적용됩니다.
+- 구간 상세의 "같은 시간대 사용자 구간" 표는 사용자 필터와 무관하게 서버에서 같은 5분 시간대의 모든 사용자 구간을 읽어 등급순으로 보여 주고, 클릭하면 그 구간으로 이동합니다(사용자 필터가 걸려 있으면 해제). 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.
 - 같은 사용자·단말 구간의 프롬프트 최고 점수(최대 60)와 그 사용자의 네트워크 점수 × 0.4(최대 40)를 합칩니다. 최고 프롬프트의 캡처와 산식을 표시합니다. 점수는 검토 우선순위이며 위반 확정이 아닙니다.
 - 구간 상세에 "프롬프트 분석 N건 · 최고 점수만 반영" 표를 표시합니다. `prompt_scores`의 모든 capture ID·사용자·점수·상태를 보여 주고 반영된 최고 점수 행을 강조합니다. 완료/미판정/오류 건수(`prompt_complete_count`, `prompt_missing_count`, `prompt_error_count`)와 최고 점수만 쓰는 이유도 함께 표시합니다. 미판정·오류는 0점이 아니라 `—`입니다.
 - "네트워크 점수 구성"은 서버의 `network_score_breakdown`만 사용합니다. 예: `네트워크 점수 68점 = 기본점수 50 + 모델 확률 점수 18 + 재시도 가산점 0 + 반복 가산점 미제공`. 모델이 주지 않은 값(반복 가산 비활성 등)은 `미제공`, 근거가 없는 이전 결과는 "구성 정보 없음"으로 표시하며 화면이 값을 만들지 않습니다.
@@ -57,7 +58,10 @@ cd backend
 | 용도 | 요청 | 응답 |
 |---|---|---|
 | 변경 알림 | `GET /api/v1/dashboard/stream` | SSE `changed` 이벤트; 최신 목록 재조회 |
-| 사용자 5분 구간 목록 | `GET /api/v1/dashboard/risk-windows?limit=200[&offset=200…]` | `{events, total, limit, offset}` |
+| 사용자 5분 구간 목록 | `GET /api/v1/dashboard/risk-windows?limit=200[&offset=200…][&date=YYYY-MM-DD][&user_id=…]` | `{events, total, limit, offset}` |
+| 날짜 목록 | `GET /api/v1/dashboard/dates` | `[{date, window_count, user_count}]` |
+| 사용자 목록 | `GET /api/v1/dashboard/users[?date=…]` | `{users, date, note}` |
+| 같은 시간대 구간 | `GET /api/v1/dashboard/risk-windows?start=<window_start>` | `{events, …}` |
 | 저장된 근거 요약 | `GET /api/v1/dashboard/explanation?window_id=...` | `{text, source: "stored"}` |
 
 구간 목록은 `limit`(1~200), `offset`, `user_id`, `start`를 지원하며 UI는 `limit=200`과 `offset`으로 페이지를 이어 읽습니다. 원문 프롬프트는 목록 응답에 포함하지 않습니다.

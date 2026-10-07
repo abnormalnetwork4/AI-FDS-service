@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem,
-  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE, sameSlotSummary } from './events.js';
+  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE, sameSlotSummary, filterQuery, fetchUsers, fetchDates } from './events.js';
 
 test('company windows show scope, provisional phase and maximum prompt provenance', () => {
   const row = normalizeEvent({ id: 'company-20261004T010000Z', scope: 'company', phase: 'open',
@@ -221,4 +221,23 @@ test('user-device windows keep user identity and same-slot summary counts grades
   assert.equal(summary.pending, 1); // 미판정은 정상으로 세지 않음
   assert.equal(summary.userCount, 3);
   assert.equal(sameSlotSummary(rows, { windowStart: null }), null);
+});
+
+test('date and user filters are sent as query parameters only when set', async () => {
+  assert.equal(filterQuery({}), '');
+  assert.equal(filterQuery({ date: '2026-10-01' }), '&date=2026-10-01');
+  assert.equal(filterQuery({ date: '2026-10-01', userId: 'user-04' }), '&date=2026-10-01&user_id=user-04');
+  assert.equal(filterQuery({ date: '10/01/2026', userId: '' }), ''); // 잘못된 날짜 형식은 보내지 않음
+  const urls = [];
+  const fetcher = async (url) => { urls.push(url); return { ok: true, json: async () => ({ events: [], total: 0, users: [] }) }; };
+  await fetchEventPage('', undefined, fetcher, 1, { date: '2026-10-01', userId: 'user-04' });
+  await fetchUsers('', '2026-10-01', undefined, fetcher);
+  await fetchUsers('', '', undefined, fetcher);
+  assert.deepEqual(urls, [
+    '/api/v1/dashboard/risk-windows?limit=200&date=2026-10-01&user_id=user-04',
+    '/api/v1/dashboard/users?date=2026-10-01',
+    '/api/v1/dashboard/users',
+  ]);
+  const dates = await fetchDates('', undefined, async () => ({ ok: true, json: async () => [{ date: '2026-10-01' }, { bad: 1 }] }));
+  assert.deepEqual(dates, [{ date: '2026-10-01' }]);
 });

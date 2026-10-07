@@ -1,4 +1,5 @@
 # FDS의 HTTP 진입점과 조회 주소를 모은 파일입니다. @router.post/get이 URL과 파이썬 함수를 연결합니다.
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -116,21 +117,34 @@ def dashboard_explanation(repo: Repo, capture_id: str | None = None, window_id: 
 
 @router.get("/dashboard/risk-windows", response_model=dashboard.DashboardPage, tags=["대시보드"])
 def risk_window_dashboard(repo: Repo, limit: Limit = 50, offset: Offset = 0, user_id: str | None = None,
-                          start: str | None = None):
+                          start: str | None = None, date: date | None = None):
     # start는 구간 시작 시각(UTC ISO 문자열, 응답의 window_start)입니다. 같은 시간대의 다른 사용자 구간 조회에 씁니다.
-    rows, total = repo.window_page(limit, offset, user_id, start)
+    # date는 한국 시간(KST) 기준 날짜(YYYY-MM-DD)입니다.
+    rows, total = repo.window_page(limit, offset, user_id, start, date)
     return dashboard.DashboardPage(events=[dashboard.present_window(row) for row in rows], total=total, limit=limit, offset=offset)
 
 
+@router.get("/dashboard/users", response_model=dashboard.UserSummaryPage, tags=["대시보드"])
+def dashboard_users(repo: Repo, date: date | None = None):
+    # 사용자 선택 목록과 사용자별 등급 분포. date는 KST 날짜이며 없으면 전체 기간입니다.
+    return dashboard.UserSummaryPage(users=repo.user_summaries(date), date=date.isoformat() if date else None)
+
+
+@router.get("/dashboard/dates", response_model=list[dashboard.WindowDate], tags=["대시보드"])
+def dashboard_dates(repo: Repo):
+    return repo.window_dates()
+
+
 @router.get("/dashboard/company-slots", response_model=dashboard.CompanySlotPage, tags=["대시보드"])
-def company_slots(repo: Repo, limit: Limit = 50, offset: Offset = 0):
-    slots, total = repo.company_slots(limit, offset)
+def company_slots(repo: Repo, limit: Limit = 50, offset: Offset = 0, date: date | None = None):
+    slots, total = repo.company_slots(limit, offset, date)
     return dashboard.CompanySlotPage(slots=slots, total=total, limit=limit, offset=offset)
 
 
 @router.get("/risk-windows", response_model=list[RiskWindow], tags=["사용자 5분 통합"])
-def risk_windows(repo: Repo, limit: Limit = 50, offset: Offset = 0, user_id: str | None = None):
-    return repo.window_page(limit, offset, user_id)[0]
+def risk_windows(repo: Repo, limit: Limit = 50, offset: Offset = 0, user_id: str | None = None,
+                 date: date | None = None):
+    return repo.window_page(limit, offset, user_id, day=date)[0]
 
 
 @router.get("/risk-windows/{window_id}", response_model=RiskWindow, tags=["사용자 5분 통합"])

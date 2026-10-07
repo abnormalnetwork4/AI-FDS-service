@@ -1,5 +1,6 @@
 # 사용자·단말 5분 통합 등급 API 계약 (v0.8)
 
+> v0.8.1: 날짜(KST)·사용자 조회 추가 — `date` 필터, `/dashboard/users`, `/dashboard/dates`. 산식 변경 없음.
 > v0.8: 판정 단위를 **회사 전체 합산 5분 구간 → 사용자·단말별 5분 구간**으로 변경. 네트워크 모델이 사용자별 5분 창으로 학습됐기 때문입니다(학습 창 ID `..._user_001_w02`, 정상 창 요청 수 중앙값 4건). 회사 전체 기록을 한 창에 합치면 입력이 학습 분포를 벗어납니다. 산식·등급 기준·모델 파일은 그대로입니다.
 > v0.7: 구간 응답에 `prompt_scores`, `network_score_breakdown` 추가.
 
@@ -24,7 +25,7 @@
 
 네트워크 점수 표시 예: `네트워크 점수 68점 = 기본점수 50 + 모델 확률 점수 18 + 재시도 가산점 0 + 반복 가산점 미제공`. 합계는 모델 정책대로 반올림·상한 100이 적용된 `network_score`이며 화면이 다시 계산하지 않습니다.
 
-시연(`examples/video_demo.py`)은 가상 사용자 데이터입니다(`--with-colleague`로 두 번째 사용자 추가). 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
+시연(`examples/video_demo.py`)은 번호가 붙은 가상 사용자 10명(`user-01`~`user-10`)의 데이터입니다. 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
 
 프롬프트 개별 산식은 유지합니다. 증류/교란 계수 0.6, 개인 목적 오남용/토큰 낭비 계수 0.8. 하나 이상 탐지 시 `min(60, 10 + (1 - 탐지 계수의 곱) × 60)`, 미탐지면 0점. 기본 10점은 한 번만 가산합니다. 확률은 위험도 점수가 아닙니다.
 
@@ -36,9 +37,11 @@
 
 | API | 의미 |
 |---|---|
-| GET /api/v1/dashboard/risk-windows | 화면용 사용자 구간 목록. events/total/limit/offset 형식. `user_id`, `start`(응답의 `window_start`, 같은 시간대) 필터 |
-| GET /api/v1/dashboard/company-slots | 회사 시간대 요약(아래) |
-| GET /api/v1/risk-windows | 원본 사용자 구간 결과 목록(`user_id` 필터) |
+| GET /api/v1/dashboard/risk-windows | 화면용 사용자 구간 목록. events/total/limit/offset 형식. `user_id`, `date`(KST YYYY-MM-DD, 그날 00:00~24:00 KST에 시작한 구간), `start`(응답의 `window_start`, 같은 시간대) 필터 |
+| GET /api/v1/dashboard/users?date= | 사용자별 요약(`user_id, devices, window_count, graded/pending/error_window_count, grade_counts, top_grade, top_score, top_window_id, first_start, last_start`). 높은 등급 → 높은 점수 순. 점수 합산·평균 없음 |
+| GET /api/v1/dashboard/dates | 구간이 있는 KST 날짜(최신순)와 `window_count`, `user_count` |
+| GET /api/v1/dashboard/company-slots?date= | 회사 시간대 요약(아래) |
+| GET /api/v1/risk-windows | 원본 사용자 구간 결과 목록(`user_id`, `date` 필터) |
 | GET /api/v1/risk-windows/{window_id} | 사용자 구간 결과 1건 |
 | GET /api/v1/company-windows[/{id}] | (이전 버전, 읽기 전용) 보존된 회사 합산 구간 |
 | GET /api/v1/dashboard/explanation?window_id=... | 최고 프롬프트와 네트워크의 저장 근거 요약 |

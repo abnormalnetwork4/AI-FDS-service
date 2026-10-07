@@ -60,24 +60,29 @@ def repository(tmp_path):
     return repo
 
 
-def test_four_scenarios_use_four_distinct_five_minute_windows():
+def test_users_and_slots_map_to_distinct_user_windows():
     day = date(2026, 10, 1)
-    seen_ids, seen_windows = set(), []
-    for scenario in video_demo.SCENARIOS:
-        start = video_demo.slot_start(day, scenario["minute"])
-        bodies = video_demo.build_bodies(scenario, start)
-        assert bodies, scenario["name"]
+    users = {u["user"] for u in video_demo.USERS}
+    assert len(users) == len(video_demo.USERS) == 10 and all(u.startswith("user-") for u in users)
+    # 각 목표 등급을 가진 사용자 구간이 모두 있어야 합니다.
+    targets = {video_demo.PATTERNS[name]["target"] for u in video_demo.USERS for name in u["plan"].values()}
+    assert targets == {"normal", "caution", "warning", "danger"}
+    seen_ids, windows = set(), []
+    for user, name, start in video_demo.plan_items(day):
+        bodies = video_demo.build_bodies(name, start, user["user"], user["device"], video_demo.PATTERNS[name]["events"])
         slots = {window_slot(b["user_id"], b["device_id"], datetime.fromisoformat(b["occurred_at"])).id for b in bodies}
-        # 모든 이벤트가 하나의 구간에, 그리고 스크립트가 예상한 구간 ID에 들어가야 합니다.
-        assert slots == {video_demo.window_id(start)}
-        seen_windows.append(slots.pop())
+        assert slots == {video_demo.window_id(start, user["user"], user["device"])}
+        windows.append(slots.pop())
         for b in bodies:
             assert b["id"].startswith("video-demo-") and b["id"] not in seen_ids
             seen_ids.add(b["id"])
             assert "score" not in b and "grade" not in b  # 점수·등급을 보내지 않음
-            EventIngest.model_validate(b)  # API 계약 형식
-    assert len(set(seen_windows)) == 4
-    assert [s["target"] for s in video_demo.SCENARIOS] == ["normal", "caution", "warning", "danger"]
+            EventIngest.model_validate(b)
+    assert len(windows) == len(set(windows)) == sum(len(u["plan"]) for u in video_demo.USERS)
+    # 둘째 날짜는 계획을 돌려 써서 사용자별 이력이 달라집니다.
+    first = {u["user"]: u["plan"] for u in video_demo.plans_for(0)}
+    second = {u["user"]: u["plan"] for u in video_demo.plans_for(1)}
+    assert first != second and sorted(map(str, first.values())) == sorted(map(str, second.values()))
 
 
 def test_max_prompt_only_not_sum_or_mean_and_all_scores_disclosed(tmp_path):
@@ -124,9 +129,8 @@ def test_network_breakdown_is_copied_from_result_not_invented(tmp_path):
 
 def test_dashboard_exposes_prompt_scores_breakdown_and_scope_note(tmp_path):
     with TestClient(create_app(tmp_path / "ui.db", data_engine=Data(), network_engine=Network())) as client:
-        body = video_demo.build_bodies(dict(name="t", events=[video_demo.req(
-            10, "30", sent=100, received=100, packets_sent=1, packets_received=1)]),
-            video_demo.slot_start(date(2026, 10, 1), 0))[0]
+        body = video_demo.build_bodies("t", video_demo.slot_start(date(2026, 10, 1), 0), "user-01", "pc-01", [video_demo.req(
+            10, "30", sent=100, received=100, packets_sent=1, packets_received=1)])[0]
         wid = client.post("/api/v1/ingest/events", json=body).json()["risk_window_id"]
         raw = client.get(f"/api/v1/risk-windows/{wid}").json()
         assert raw["prompt_scores"][0]["score"] == 30 and raw["network_score_breakdown"]["base_score"] == 50
@@ -149,16 +153,17 @@ class ClientApi:
 
 
 def test_script_reports_mismatch_instead_of_false_success(tmp_path, capsys):
-    # 시험용 엔진은 프롬프트 0점·네트워크 0점이라 모든 구간이 normal입니다. caution~danger는 목표와 달라야 합니다.
+    # 시험용 엔진은 프롬프트 0점·네트워크 0점이라 모든 구간이 normal입니다. 다른 목표 구간은 '다름'이어야 합니다.
     engine = Network(score=0, breakdown=None)
     with TestClient(create_app(tmp_path / "s.db", data_engine=Data(), network_engine=engine)) as client:
         code = video_demo.main(["--date", "2026-10-01", "--timeout", "0"], api=ClientApi(client))
         out = capsys.readouterr().out
         assert code == 1
-        assert out.count("목표와 실제 결과가 다름") == 3 and out.count("목표와 실제 결과가 같음") == 1
-        assert "시나리오: danger" in out and "목표 등급              : danger" in out
-        assert "실제 등급              : normal" in out
-        assert "모두 목표 등급과 실제 등급이 같았습니다" not in out
+        total = sum(len(u["plan"]) for u in video_demo.USERS)
+        normal = sum(video_demo.PATTERNS[n]["target"] == "normal" for u in video_demo.USERS for n in u["plan"].values())
+        assert f"구간 {total}개 중 목표와 같음 {normal}개, 다름 {total - normal}개" in out
+        assert "다름: 2026-10-01 10:15 user-06 danger 목표 danger → 실제 normal" in out
+        assert "모든 구간이 목표 등급과 같았습니다" not in out
         # 같은 날짜 재실행은 기존 구간과 섞이지 않도록 중단합니다.
         assert video_demo.main(["--date", "2026-10-01"], api=ClientApi(client)) == 3
 
@@ -167,18 +172,26 @@ def test_verdict_and_summary_never_treat_null_as_success(capsys):
     assert video_demo.verdict("danger", "danger")[0] == "match"
     assert video_demo.verdict("danger", "warning") == ("mismatch", "목표와 실제 결과가 다름")
     assert video_demo.verdict("normal", None)[0] == "mismatch"
-    ok = dict(name="normal", target="normal", actual="normal", state="match", window_id="w", score=0)
+    ok = dict(date="2026-10-01", start=datetime(2026, 10, 1, 10), user="user-01", pattern="normal",
+              target="normal", actual="normal", state="match", window_id="w", score=0)
     assert video_demo.summarize([ok]) == 0
     pending = dict(ok, actual=None, state="mismatch", score=None)
     assert video_demo.summarize([ok, pending]) == 1
 
 
-def test_colleague_option_creates_separate_user_windows(tmp_path, capsys):
-    with TestClient(create_app(tmp_path / "c.db", data_engine=Data(), network_engine=Network(score=0, breakdown=None))) as client:
-        video_demo.main(["--date", "2026-10-01", "--timeout", "0", "--with-colleague"], api=ClientApi(client))
-        out = capsys.readouterr().out
-        windows = client.get("/api/v1/risk-windows?limit=50").json()
-        assert len(windows) == 8 and {w["user_id"] for w in windows} == {"demo-user", "colleague-user"}
-        demo = [w for w in windows if w["user_id"] == "demo-user"]
-        assert sorted(w["capture_count"] for w in demo) == sorted(len(s["events"]) for s in video_demo.SCENARIOS)
-        assert "사용자 2명" in out and "회사 점수 아님" in out
+def test_multiple_dates_create_separate_dated_windows_and_user_views(tmp_path, capsys):
+    with TestClient(create_app(tmp_path / "d.db", data_engine=Data(), network_engine=Network(score=0, breakdown=None))) as client:
+        video_demo.main(["--date", "2026-10-01", "2026-10-02", "--timeout", "0"], api=ClientApi(client))
+        capsys.readouterr()
+        per_day = sum(len(u["plan"]) for u in video_demo.USERS)
+        dates = client.get("/api/v1/dashboard/dates").json()
+        assert [d["date"] for d in dates] == ["2026-10-02", "2026-10-01"]
+        assert all(d["window_count"] == per_day and d["user_count"] == 10 for d in dates)
+        day1 = client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-10-01", "limit": 200}).json()
+        assert day1["total"] == per_day
+        one = client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-10-02", "user_id": "user-01"}).json()
+        # 둘째 날짜의 user-01은 USERS[1](user-02)의 계획을 씁니다.
+        assert one["total"] == len(video_demo.USERS[1]["plan"]) and {e["user"] for e in one["events"]} == {"user-01"}
+        users = client.get("/api/v1/dashboard/users", params={"date": "2026-10-01"}).json()
+        assert len(users["users"]) == 10 and users["date"] == "2026-10-01"
+        assert client.get("/api/v1/dashboard/users").json()["users"][0]["window_count"] >= 1

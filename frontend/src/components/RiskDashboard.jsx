@@ -1,4 +1,4 @@
-import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -155,7 +155,7 @@ async function explainEvent(event) {
   return res.json();
 }
 
-function useEvents({ live }) {
+function useEvents({ live, filters }) {
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
   const [mode, setMode] = useState("polling");
@@ -205,13 +205,13 @@ function useEvents({ live }) {
         setError(e.message || "요청 실패");
     };
     if (live) return watchEvents({ base: API_BASE,
-      fetchPage: (signal) => fetchEventPage(API_BASE, signal, fetch, pages), onData, onError, onMode: setMode });
+      fetchPage: (signal) => fetchEventPage(API_BASE, signal, fetch, pages, filters), onData, onError, onMode: setMode });
     const ctrl = new AbortController();
-    fetchEventPage(API_BASE, ctrl.signal, fetch, pages).then((data) => {
+    fetchEventPage(API_BASE, ctrl.signal, fetch, pages, filters).then((data) => {
       if (!ctrl.signal.aborted) onData(data);
     }).catch((error) => { if (!ctrl.signal.aborted) onError(error); });
     return () => ctrl.abort();
-  }, [live, reloadKey, pages]);
+  }, [live, reloadKey, pages, filters]);
 
   return {
     events,
@@ -711,8 +711,31 @@ function CompanyBreakdown({ event }) {
   );
 }
 
-// 같은 5분 시간대의 다른 사용자 구간. 클릭하면 그 구간 상세로 이동합니다. 회사 점수를 따로 계산하지 않습니다.
-function SameSlotPanel({ summary, selectedId, onSelect }) {
+// 날짜·사용자 선택 목록. 수집 결과가 바뀌면(목록 건수 변화) 다시 읽습니다.
+function useScopeOptions(date, version) {
+  const [dates, setDates] = useState([]);
+  const [users, setUsers] = useState([]);
+  useEffect(() => {
+    if (USE_MOCK) return undefined;
+    const ctrl = new AbortController();
+    fetchDates(API_BASE, ctrl.signal).then(setDates).catch(() => {});
+    fetchUsers(API_BASE, date, ctrl.signal).then(setUsers).catch(() => {});
+    return () => ctrl.abort();
+  }, [date, version]);
+  return { dates, users };
+}
+
+// 같은 5분 시간대의 다른 사용자 구간. 사용자 필터와 무관하게 서버에서 그 시간대 전체를 읽습니다.
+// 클릭하면 그 구간 상세로 이동합니다. 회사 점수를 따로 계산하지 않습니다.
+function SameSlotPanel({ selected, events, isMock, onSelect }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (isMock || !selected.windowStart) return undefined;
+    const ctrl = new AbortController();
+    fetchSameSlot(API_BASE, selected.windowStart, ctrl.signal).then(setRows).catch(() => setRows(null));
+    return () => ctrl.abort();
+  }, [isMock, selected.windowStart, selected.revision]);
+  const summary = sameSlotSummary(rows ?? events, selected);
   if (!summary) return null;
   const { windows, counts, pending, error, userCount } = summary;
   return (
@@ -728,9 +751,9 @@ function SameSlotPanel({ summary, selectedId, onSelect }) {
             <thead><tr><th>사용자 · 단말</th><th>등급</th><th>통합 점수</th><th>프롬프트 최고</th></tr></thead>
             <tbody>
               {windows.map((w) => (
-                <tr key={w.id} className={w.id === selectedId ? "is-max" : "is-link"} onClick={() => onSelect(w.id)}
+                <tr key={w.id} className={w.id === selected.id ? "is-max" : "is-link"} onClick={() => onSelect(w)}
                   title="클릭하면 이 사용자 구간을 엽니다">
-                  <td>{w.user} · {w.device_id}{w.id === selectedId && <b> · 현재</b>}</td>
+                  <td>{w.user} · {w.device_id}{w.id === selected.id && <b> · 현재</b>}</td>
                   <td style={{ color: LEVELS[eventLevel(w)].color }}>{LEVELS[eventLevel(w)].label}</td>
                   <td>{formatScore(w.score)}</td>
                   <td>{w.prompt_max_score == null ? "—" : `${formatScore(w.prompt_max_score)}/60`}</td>
@@ -739,7 +762,7 @@ function SameSlotPanel({ summary, selectedId, onSelect }) {
             </tbody>
           </table>
         </div>
-        <p className="company-breakdown__note">화면에 불러온 구간 기준입니다. 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.</p>
+        <p className="company-breakdown__note">{rows ? "서버 기준 같은 시간대 전체 사용자입니다." : "화면에 불러온 구간 기준입니다."} 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.</p>
       </section>
     </div>
   );
@@ -747,7 +770,11 @@ function SameSlotPanel({ summary, selectedId, onSelect }) {
 
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
-  const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh, hasMore, capped, loadingMore, loadMore } = useEvents({ live });
+  const [dateFilter, setDateFilter] = useState(""); // 한국 시간 YYYY-MM-DD, 빈 값은 전체 날짜
+  const [userFilter, setUserFilter] = useState(""); // 빈 값은 전체 사용자
+  const filters = useMemo(() => ({ date: dateFilter, userId: userFilter }), [dateFilter, userFilter]);
+  const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh, hasMore, capped, loadingMore, loadMore } = useEvents({ live, filters });
+  const { dates, users } = useScopeOptions(dateFilter, events.length);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -1134,6 +1161,9 @@ export default function RiskDashboard() {
         .company-breakdown tr.is-link { cursor: pointer; }
         .company-breakdown tr.is-link:hover td { background: var(--tint); }
         .company-breakdown--single { grid-template-columns: 1fr; }
+        .scope-filters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+        .scope-filters select { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px;
+          background: var(--panel); color: var(--text); font-size: 12px; }
         .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
         .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
         .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
@@ -1252,6 +1282,25 @@ export default function RiskDashboard() {
       <div className="dash-body">
         <div className="side">
           <div className="filter-bar">
+            {!isMock && (
+              <div className="scope-filters">
+                <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} aria-label="날짜(KST)">
+                  <option value="">전체 날짜</option>
+                  {dates.map((d) => (
+                    <option key={d.date} value={d.date}>{d.date} · 사용자 {d.user_count}명 · 구간 {d.window_count}</option>
+                  ))}
+                </select>
+                <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} aria-label="사용자">
+                  <option value="">전체 사용자</option>
+                  {users.map((u) => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.user_id} · 최고 {u.top_grade ? LEVELS[u.top_grade].label : "미판정"} · 구간 {u.window_count}
+                    </option>
+                  ))}
+                  {userFilter && !users.some((u) => u.user_id === userFilter) && <option value={userFilter}>{userFilter} (이 날짜 기록 없음)</option>}
+                </select>
+              </div>
+            )}
             <div className="search-box">
               <Search size={14} color="#8B8F99" />
               <input
@@ -1386,7 +1435,8 @@ export default function RiskDashboard() {
 
             {(selected.scope === "company" || selected.scope === "user_device") && <CompanyBreakdown event={selected} />}
             {selected.scope === "user_device" && (
-              <SameSlotPanel summary={sameSlotSummary(events, selected)} selectedId={selected.id} onSelect={setSelectedId} />
+              <SameSlotPanel selected={selected} events={events} isMock={isMock}
+                onSelect={(row) => { if (userFilter && row.user !== userFilter) setUserFilter(""); setSelectedId(row.id); }} />
             )}
 
             <div className="detail-main">

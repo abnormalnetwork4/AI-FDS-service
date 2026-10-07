@@ -82,61 +82,47 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 .\.venv\Scripts\python.exe examples/event_demo.py
 ```
 
-### 시연 영상용 등급별 시나리오 (`examples/video_demo.py`)
+### 시연 영상용 다중 사용자 시나리오 (`examples/video_demo.py`)
 
-가상 사용자 `demo-user`·단말 `demo-pc`의 관측 기록만 `POST /api/v1/ingest/events`로 보냅니다. 실제 AI 요청·네트워크 전송은 하지 않으며 점수·등급을 보내지 않습니다. 시나리오마다 다른 고정 5분 구간(KST 10:00·10:05·10:10·10:15)을 쓰고, 전송 후 `GET /api/v1/company-windows/{id}`의 실제 결과를 출력합니다.
+번호가 붙은 가상 사용자 10명(`user-01`~`user-10`, 단말 `pc-01`… `laptop-05`)의 관측 기록만 `POST /api/v1/ingest/events`로 보냅니다. 실제 AI 요청·네트워크 전송은 하지 않으며 점수·등급을 보내지 않습니다. 각 날짜의 KST 10:00·10:05·10:10·10:15 구간에 사용자마다 정해진 패턴을 보내고, 전송 후 `GET /api/v1/risk-windows/{id}`의 실제 결과를 표로 출력합니다.
 
-| 시나리오(목표) | 입력 의도 |
+| 패턴(목표) | 입력 의도 |
 |---|---|
 | normal | 업무 요약 3건, 요청당 3~4KB, 파일·재시도 없음 |
-| caution | 브라우저·스크립트가 번갈아 15초 간격 6건, 반복 출력 요구 프롬프트 1건, 작은 전송량 |
+| caution_repeat (caution) | 브라우저·스크립트가 번갈아 15초 간격 6건, 반복 출력 요구 프롬프트 1건 |
+| caution_prompt (caution) | 정상 업무 2건 사이 지시 무시 유도 프롬프트 1건, 정상 전송량 |
 | warning | 자동화 스크립트 2개가 12초 간격 22건(응답 겹침), 요청당 9KB, 응답 수집 의도 프롬프트 |
 | danger | 복합 위험 프롬프트, 요청당 0.6~0.9MB·파일 6~8개, 테넌트·미승인 목적지 전환, 차단 후 재시도 |
 
+| 사용자 | 10:00 | 10:05 | 10:10 | 10:15 | 줄거리 |
+|---|---|---|---|---|---|
+| user-01 | normal | normal | normal | normal | 평범한 사무 업무만 계속 |
+| user-02 | normal | caution_repeat | normal | | 잠깐 반복 요청 후 정상 복귀 |
+| user-03 | normal | | warning | normal | 자동화 스크립트를 한 차례 돌림 |
+| user-04 | normal | caution_repeat | warning | danger | 점점 위험해지다 대량 유출 시도 |
+| user-05 | | caution_prompt | | caution_repeat | 지시 무시 시도와 반복 요청 |
+| user-06 | | | | danger | 갑자기 대량 유출 시도 |
+| user-07 | | warning | warning | | 자동화 수집을 연속 실행 |
+| user-08 | | | normal | | 한 번 짧게 사용 |
+| user-09 | caution_repeat | caution_repeat | caution_repeat | | 반복 요청을 계속 |
+| user-10 | danger | normal | | | 출근 직후 유출 시도 후 정상 업무 |
+
+날짜를 여러 개 주면 두 번째 날짜부터 계획을 한 칸씩 돌려(둘째 날 user-01은 위 표 user-02의 계획) 사용자마다 날짜별 이력이 달라집니다.
+
 ```powershell
-# 창 1
+# 창 1 (backend 폴더)
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
-# 창 2 (같은 날짜를 다시 쓰면 기존 구간과 섞이므로 중단됩니다. --date로 다른 날짜, 과거 날짜도 가능)
-.\.venv\Scripts\python.exe examples\video_demo.py
+# 창 2 (backend 폴더). 같은 날짜를 다시 쓰면 기존 구간과 섞이므로 중단됩니다.
 .\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01
+.\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01 2026-10-02   # 여러 날짜
+.\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01 --detail      # 구간별 점수 구성 상세
 ```
 
-출력: 시나리오, 전송 이벤트 수, `risk_window_id`(사용자·단말), 프롬프트 분석 건수, 프롬프트 최고 점수와 근거 capture/user ID, 네트워크 점수와 구성, 반영 점수, 통합 점수, 실제 네트워크 판정 유형, 목표 등급·실제 등급·판정.
+출력: 구간별 표(날짜, 시간, 사용자, 단말, 패턴, 목표·실제 등급, 통합·프롬프트·네트워크 점수, 판정 유형, 일치 여부), 날짜별 사용자 요약(`/dashboard/users`), 회사 시간대 요약(`/dashboard/company-slots`). `--detail`은 구간마다 `risk_window_id`, 프롬프트 분석 건수, 최고 점수 capture ID, 네트워크 점수 구성을 추가로 출력합니다.
 
-**시나리오 이름은 목표일 뿐 결과를 보장하지 않습니다.** 네트워크 모델은 24개 행동 피처의 조합으로 판정하므로 `bytes_sent`·`file_count`를 키워도 반드시 위험 유형이 되지 않고, 작은 입력이 위협으로 판정될 수도 있습니다. 같은 사용자의 최근 1시간 기록도 피처로 쓰므로 DB에 demo-user의 이전 기록이 있으면 결과가 달라질 수 있습니다(이전 회사 합산 구조에서는 caution 입력을 조금 바꾸자 기존 이력 유무에 따라 normal·N3·N5가 갈렸습니다). 목표와 실제가 다르면 "목표와 실제 결과가 다름"을 표시하고 종료 코드 1을 반환합니다. 실제 등급이 미판정(null)이어도 성공으로 보지 않습니다. 스크립트는 값을 자동 조정하거나 등급을 덮어쓰지 않으므로, 필요하면 파일 위쪽 시나리오 입력값을 직접 고친 뒤 다른 날짜로 다시 실행합니다.
+**패턴 이름은 목표일 뿐 결과를 보장하지 않습니다.** 네트워크 모델은 24개 행동 피처의 조합으로 판정하므로 `bytes_sent`·`file_count`를 키워도 반드시 위험 유형이 되지 않고, 작은 입력이 위협으로 판정될 수도 있습니다(예: 짧은 정상 요청 2건만 보내는 시험 패턴이 N5로 판정돼 정상 등급 안에서 네트워크 24점이 나온 적이 있어 시연 패턴에서 뺐습니다). 같은 사용자의 최근 1시간 기록도 피처로 쓰므로 앞선 구간과 DB 상태에 따라서도 달라집니다. 목표와 실제가 다르면 "다름"으로 표시하고 종료 코드 1을 반환합니다. 실제 등급이 미판정(null)이어도 성공으로 보지 않습니다. 스크립트는 값을 자동 조정하거나 등급을 덮어쓰지 않습니다.
 
-결과는 `demo-user`·`demo-pc`의 5분 구간 위험도입니다. `--with-colleague`를 붙이면 같은 시간대에 평범한 업무만 하는 `colleague-user`도 보내며, 두 사용자의 구간이 서로 섞이지 않는 것과 회사 시간대 요약(사용자 구간 등급 집계)을 함께 출력합니다. 가상 데이터이므로 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
-
-```powershell
-.\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01 --with-colleague
-```
-
-### 완료된 세션을 전송하는 기존 경로
-
-`POST /api/v1/ingest/captures`에 다음처럼 보냅니다. AI 사용 명령이 아니라 이미 관측한 통신 기록의 복사본입니다.
-
-```json
-{
-  "id": "capture-001",
-  "session": {
-    "id": "flow-001",
-    "user_id": "employee-1",
-    "device_id": "pc-1",
-    "started_at": "2026-09-28T10:00:00+09:00",
-    "ended_at": "2026-09-28T10:00:01+09:00",
-    "destination": "local-ai.internal",
-    "bytes_sent": 1024,
-    "bytes_received": 2048,
-    "source": "packet_capture"
-  }
-}
-```
-
-프롬프트가 없어도 Network 분석은 진행합니다. `ai_event`와 `prompt`는 선택 항목입니다. 프롬프트를 확보했다면 같은 세션에 연결된 `ai_event`와 함께 전송합니다. `/docs`의 스키마와 `examples/passive_demo.py`에 예시가 있습니다.
-
-HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용자를 알아낼 수는 없습니다. 프롬프트는 별도 앱 로그에서 확보하고, 사용자·단말은 수집기가 자산/사용자 매핑을 통해 연결해야 합니다. 미식별 대상은 실제 직원 계정처럼 만들지 말고 수집기에서 구분 가능한 관측용 식별자를 사용합니다.
-
-`via_gateway`는 기존 네트워크 경로의 관측값이며 FDS 제어 설정이 아닙니다. 미확인이면 생략/null로 보내며, 미확인을 우회 접속으로 집계하지 않습니다. `connection_action`과 이벤트의 `policy_action`도 외부 시스템에서 관측한 값이고 이 서버가 실행하는 명령이 아닙니다.
+가상 데이터이므로 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
 
 ## 조회 API
 
@@ -148,9 +134,11 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | GET | `/api/v1/captures` | 수집 기록·프롬프트 확보 상태 |
 | GET | `/api/v1/assessments` | 캡처별 분석 묶음 |
 | GET | `/api/v1/assessments/{capture_id}` | 개별 프롬프트 결과 + risk_window_id |
-| GET | `/api/v1/risk-windows`, `/api/v1/risk-windows/{window_id}` | 사용자·단말 5분 통합 결과(`user_id` 필터). `prompt_scores`와 `network_score_breakdown` 포함 |
-| GET | `/api/v1/dashboard/risk-windows` | 화면용 사용자 구간 목록. `user_id`, `start`(같은 시간대) 필터 |
-| GET | `/api/v1/dashboard/company-slots` | 회사 시간대 요약: 사용자 수, 등급별 구간 수, 미판정·오류 수, 최고 등급 구간. 회사 점수를 합산·평균하지 않음 |
+| GET | `/api/v1/risk-windows`, `/api/v1/risk-windows/{window_id}` | 사용자·단말 5분 통합 결과(`user_id`, `date` 필터). `prompt_scores`와 `network_score_breakdown` 포함 |
+| GET | `/api/v1/dashboard/risk-windows` | 화면용 사용자 구간 목록. `user_id`, `date`(KST 날짜), `start`(같은 시간대) 필터 |
+| GET | `/api/v1/dashboard/users?date=` | 사용자별 요약: 구간 수, 등급별 구간 수, 가장 높은 등급 구간(점수 합산 아님). 높은 등급 순 |
+| GET | `/api/v1/dashboard/dates` | 구간이 있는 KST 날짜 목록과 날짜별 구간·사용자 수 |
+| GET | `/api/v1/dashboard/company-slots?date=` | 회사 시간대 요약: 사용자 수, 등급별 구간 수, 미판정·오류 수, 최고 등급 구간. 회사 점수를 합산·평균하지 않음 |
 | GET | `/api/v1/company-windows`, `/api/v1/company-windows/{id}` | (이전 버전, 읽기 전용) 보존된 회사 전체 합산 구간 |
 | POST / GET | `/api/v1/network-sessions` | 세션 개별 등록/조회 |
 | POST / GET | `/api/v1/ai-usage-events` | AI 사용 이벤트 개별 등록/조회 |

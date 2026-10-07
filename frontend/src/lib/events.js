@@ -115,11 +115,21 @@ export function normalizeEvent(raw) {
 export const PAGE_SIZE = 200;
 export const MAX_PAGES = 10;
 
-export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1) {
+// 조회 조건: date(한국 시간 YYYY-MM-DD), user_id. 빈 값은 보내지 않습니다(전체).
+export function filterQuery(filters = {}) {
+  const params = new URLSearchParams();
+  if (typeof filters.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(filters.date)) params.set('date', filters.date);
+  if (typeof filters.userId === 'string' && filters.userId) params.set('user_id', filters.userId);
+  const text = params.toString();
+  return text ? `&${text}` : '';
+}
+
+export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1, filters = {}) {
   const count = Math.max(1, Math.min(MAX_PAGES, Math.trunc(pages) || 1));
+  const extra = filterQuery(filters);
   const one = async (index) => {
     const offset = index ? `&offset=${index * PAGE_SIZE}` : '';
-    const response = await fetcher(`${base}/api/v1/dashboard/risk-windows?limit=${PAGE_SIZE}${offset}`, { signal });
+    const response = await fetcher(`${base}/api/v1/dashboard/risk-windows?limit=${PAGE_SIZE}${offset}${extra}`, { signal });
     if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
     const page = await response.json();
     if (!Array.isArray(page.events) || !Number.isInteger(page.total)) throw new Error('올바르지 않은 대시보드 응답');
@@ -203,4 +213,28 @@ export function sameSlotSummary(events, selected) {
   const order = (w) => (w.grade && w.status !== 'error' ? RANK[w.grade] : -1);
   const sorted = [...windows].sort((a, b) => order(b) - order(a) || (b.score ?? -1) - (a.score ?? -1) || (a.id < b.id ? -1 : 1));
   return { windows: sorted, counts, pending, error, userCount: new Set(windows.map((w) => w.user)).size };
+}
+
+// 날짜 목록(한국 시간)과 사용자 목록. 사용자 목록은 가장 높은 등급 순이며 점수를 합산하지 않습니다.
+export async function fetchDates(base, signal, fetcher = fetch) {
+  const response = await fetcher(`${base}/api/v1/dashboard/dates`, { signal });
+  if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows.filter((r) => typeof r?.date === 'string') : [];
+}
+
+export async function fetchUsers(base, date, signal, fetcher = fetch) {
+  const query = filterQuery({ date }).replace(/^&/, '?');
+  const response = await fetcher(`${base}/api/v1/dashboard/users${query}`, { signal });
+  if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
+  const page = await response.json();
+  return Array.isArray(page?.users) ? page.users : [];
+}
+
+// 같은 시간대 사용자 구간을 서버에서 직접 읽습니다(사용자 필터와 무관하게 전체 사용자).
+export async function fetchSameSlot(base, windowStart, signal, fetcher = fetch) {
+  const response = await fetcher(`${base}/api/v1/dashboard/risk-windows?limit=200&start=${encodeURIComponent(windowStart)}`, { signal });
+  if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
+  const page = await response.json();
+  return Array.isArray(page?.events) ? page.events.map(normalizeEvent) : [];
 }

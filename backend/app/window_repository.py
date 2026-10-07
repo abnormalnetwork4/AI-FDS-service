@@ -1,12 +1,21 @@
 """사용자·단말 5분 위험 구간 저장과 버전 검증. 모델 실행 중에는 DB 쓰기 잠금을 잡지 않습니다."""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 from .contracts import RiskWindow
 from .schemas import AIUsageEvent, NetworkSession, now
 from .scoring import fuse_parts
 
 GRADE_RANK = {"normal": 0, "caution": 1, "warning": 2, "danger": 3}
+# 화면의 '날짜'는 한국 시간 기준입니다. 저장값(start)은 UTC ISO 문자열("...Z")입니다.
+KST = timezone(timedelta(hours=9))
+
+
+def day_bounds(day):
+    """KST 날짜 하루를 저장 형식과 같은 UTC 문자열 [시작, 끝)으로 바꿉니다."""
+    start = datetime.combine(day, time(), KST).astimezone(timezone.utc)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return start.strftime(fmt), (start + timedelta(days=1)).strftime(fmt)
 POLICY = "userdevice5m-promptmax60-network40-v3"
 
 
@@ -163,7 +172,8 @@ class WindowRepository:
                     group["phase"] = "closed"
                     self._write_window(conn, group)
 
-    def window_page(self, limit=50, offset=0, user_id=None, start=None):
+    @staticmethod
+    def _window_filter(user_id=None, start=None, day=None):
         where, params = "kind='risk_window'", []
         if user_id is not None:
             where += " AND user_id=?"
@@ -171,6 +181,13 @@ class WindowRepository:
         if start is not None:
             where += " AND json_extract(payload, '$.start')=?"
             params.append(start)
+        if day is not None:
+            where += " AND json_extract(payload, '$.start')>=? AND json_extract(payload, '$.start')<?"
+            params.extend(day_bounds(day))
+        return where, params
+
+    def window_page(self, limit=50, offset=0, user_id=None, start=None, day=None):
+        where, params = self._window_filter(user_id, start, day)
         with self.connection() as conn:
             conn.execute("BEGIN")
             total = conn.execute(f"SELECT count(*) FROM records WHERE {where}", params).fetchone()[0]
@@ -178,10 +195,51 @@ class WindowRepository:
                 ORDER BY json_extract(payload, '$.start') DESC, id LIMIT ? OFFSET ?""", [*params, limit, offset]).fetchall()
         return [json.loads(row["payload"]) for row in rows], total
 
-    def company_slots(self, limit=50, offset=0):
-        """회사 화면용 시간대 요약. 새 점수를 만들지 않고 사용자 구간 결과를 세고 가장 높은 등급 구간을 가리킵니다."""
+    def user_summaries(self, day=None):
+        """사용자별 요약(선택한 KST 날짜 기준). 점수를 합산하지 않고 구간 수와 가장 높은 등급 구간만 셉니다."""
+        where, params = self._window_filter(day=day)
         with self.connection() as conn:
-            rows = conn.execute("SELECT payload FROM records WHERE kind='risk_window'").fetchall()
+            rows = conn.execute(f"SELECT payload FROM records WHERE {where}", params).fetchall()
+        users = {}
+        for row in rows:
+            w = json.loads(row["payload"])
+            users.setdefault(w["user_id"], []).append(w)
+        result = []
+        for user_id, windows in users.items():
+            graded = [w for w in windows if w.get("fusion_status") == "complete" and w.get("final_grade")]
+            top = max(graded, key=lambda w: (GRADE_RANK[w["final_grade"]], w["score"] or 0, w["id"]), default=None)
+            result.append(dict(
+                user_id=user_id, devices=sorted({w["device_id"] for w in windows}),
+                window_count=len(windows), graded_window_count=len(graded),
+                pending_window_count=sum(w.get("fusion_status") == "pending" for w in windows),
+                error_window_count=sum(w.get("fusion_status") == "error" for w in windows),
+                grade_counts={g: sum(w.get("final_grade") == g for w in graded) for g in GRADE_RANK},
+                top_grade=top["final_grade"] if top else None, top_score=top["score"] if top else None,
+                top_window_id=top["id"] if top else None,
+                first_start=min(w["start"] for w in windows), last_start=max(w["start"] for w in windows),
+            ))
+        # 높은 등급 → 높은 점수 → 사용자 ID 순
+        result.sort(key=lambda u: (-GRADE_RANK.get(u["top_grade"], -1), -(u["top_score"] or 0), u["user_id"]))
+        return result
+
+    def window_dates(self):
+        """구간이 있는 KST 날짜 목록(최신순)과 날짜별 구간·사용자 수."""
+        with self.connection() as conn:
+            rows = conn.execute("SELECT user_id, json_extract(payload, '$.start') AS start FROM records WHERE kind='risk_window'").fetchall()
+        days = {}
+        for row in rows:
+            day = datetime.fromisoformat(row["start"].replace("Z", "+00:00")).astimezone(KST).date().isoformat()
+            entry = days.setdefault(day, {"date": day, "window_count": 0, "users": set()})
+            entry["window_count"] += 1
+            entry["users"].add(row["user_id"])
+        return [dict(date=d["date"], window_count=d["window_count"], user_count=len(d["users"]))
+                for d in sorted(days.values(), key=lambda d: d["date"], reverse=True)]
+
+    def company_slots(self, limit=50, offset=0, day=None):
+        """회사 화면용 시간대 요약. 새 점수를 만들지 않고 사용자 구간 결과를 세고 가장 높은 등급 구간을 가리킵니다."""
+        where, params = self._window_filter(day=day)
+        with self.connection() as conn:
+            rows = conn.execute(f"SELECT payload FROM records WHERE {where}", params).fetchall()
         slots = {}
         for row in rows:
             w = json.loads(row["payload"])

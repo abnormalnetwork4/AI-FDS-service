@@ -269,3 +269,24 @@ def test_network_error_keeps_prompt_evidence_without_fused_score(tmp_path):
     assert group["score"] is None and group["fusion_status"] == "error"
     assert group["prompt_max_score"] == 50 and group["prompt_source_capture_id"] == "failure"
     assert group["override"] is False and group["network_score"] is None
+
+
+def test_kst_date_and_user_filters(tmp_path):
+    repo, net = repository(tmp_path), Network()
+    ingest(repo, body("late-night", "10", "a", at="2026-10-04T23:58:00+09:00"), Data(), net)   # UTC 14:58 (10/4)
+    ingest(repo, body("after-midnight", "50", "a", at="2026-10-05T00:02:00+09:00"), Data(), net)  # UTC 15:02 (10/4)
+    ingest(repo, body("other", "0", "b", at="2026-10-05T09:00:00+09:00"), Data(), net)
+    with TestClient(create_app(repo.path, data_engine=Data(), network_engine=net)) as client:
+        oct4 = client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-10-04"}).json()
+        oct5 = client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-10-05"}).json()
+        # UTC로는 같은 날이어도 한국 시간 날짜로 나눕니다.
+        assert oct4["total"] == 1 and oct5["total"] == 2
+        assert client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-10-05", "user_id": "a"}).json()["total"] == 1
+        assert [d["date"] for d in client.get("/api/v1/dashboard/dates").json()] == ["2026-10-05", "2026-10-04"]
+        users = client.get("/api/v1/dashboard/users", params={"date": "2026-10-05"}).json()["users"]
+        assert [u["user_id"] for u in users] == ["a", "b"]  # 높은 등급(a: 50+28=78 위험) 먼저
+        assert users[0]["top_grade"] == "danger" and users[0]["window_count"] == 1
+        all_a = next(u for u in client.get("/api/v1/dashboard/users").json()["users"] if u["user_id"] == "a")
+        assert all_a["window_count"] == 2 and all_a["grade_counts"]["danger"] == 1
+        assert client.get("/api/v1/dashboard/company-slots", params={"date": "2026-10-04"}).json()["total"] == 1
+        assert client.get("/api/v1/dashboard/risk-windows", params={"date": "2026-13-01"}).status_code == 422

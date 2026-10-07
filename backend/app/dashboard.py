@@ -200,6 +200,34 @@ class CompanySlot(BaseModel):
     window_ids: list[str] = Field(default_factory=list)
 
 
+class UserSummary(BaseModel):
+    """사용자별 요약. 점수를 합산·평균하지 않고 구간 수와 가장 높은 등급 구간을 보여 줍니다."""
+    user_id: str
+    devices: list[str]
+    window_count: int
+    graded_window_count: int
+    pending_window_count: int
+    error_window_count: int
+    grade_counts: dict[str, int]
+    top_grade: Literal["normal", "caution", "warning", "danger"] | None = None
+    top_score: float | None = None
+    top_window_id: str | None = None
+    first_start: str
+    last_start: str
+
+
+class UserSummaryPage(BaseModel):
+    users: list[UserSummary]
+    date: str | None = None  # KST 날짜. 없으면 전체 기간
+    note: str = "사용자별로 구간 수와 가장 높은 등급만 셉니다. 사용자 점수를 합산·평균하지 않으며 미판정은 정상으로 세지 않습니다."
+
+
+class WindowDate(BaseModel):
+    date: str  # KST
+    window_count: int
+    user_count: int
+
+
 class CompanySlotPage(BaseModel):
     slots: list[CompanySlot]
     total: int
