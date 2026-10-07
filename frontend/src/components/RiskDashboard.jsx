@@ -1229,7 +1229,9 @@ export default function RiskDashboard() {
         .view-tabs { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--border); background: var(--panel); }
         .view-tabs button { border: none; background: none; padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
         .view-tabs button.is-on { color: var(--accent); border-bottom-color: var(--accent); }
-        .ov { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+        .ov { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; }
+        .ov > * { flex-shrink: 0; min-width: 0; }
+        .ov-chart { width: 100%; min-width: 0; }
         .ov-toolbar { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
         .ov-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-dim); }
         .ov-field select { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12.5px; }
