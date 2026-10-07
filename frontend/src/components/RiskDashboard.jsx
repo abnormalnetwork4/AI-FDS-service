@@ -1,6 +1,7 @@
 import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
+import RiskOverview from "./RiskOverview.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldAlert,
@@ -828,6 +829,7 @@ function SameSlotPanel({ selected, events, isMock, onSelect }) {
 
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
+  const [view, setView] = useState(USE_MOCK ? "detail" : "overview"); // overview: 기본 그래프, detail: 구간 상세 분석
   const [dateFilter, setDateFilter] = useState(""); // 한국 시간 YYYY-MM-DD, 빈 값은 전체 날짜
   const [userFilter, setUserFilter] = useState(""); // 빈 값은 전체 사용자
   const filters = useMemo(() => ({ date: dateFilter, userId: userFilter }), [dateFilter, userFilter]);
@@ -1224,6 +1226,39 @@ export default function RiskDashboard() {
           background: var(--panel); color: var(--text); font-size: 12px; }
         .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
         .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+        .view-tabs { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--border); background: var(--panel); }
+        .view-tabs button { border: none; background: none; padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .view-tabs button.is-on { color: var(--accent); border-bottom-color: var(--accent); }
+        .ov { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+        .ov-toolbar { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+        .ov-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-dim); }
+        .ov-field select { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12.5px; }
+        .ov-legend { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; padding-top: 18px; }
+        .ov-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--text-dim); cursor: pointer; }
+        .ov-chip.is-on { color: var(--text); border-color: #c3c2b7; font-weight: 600; }
+        .ov-chip__grade { font-size: 11px; font-weight: 600; }
+        .ov-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; border: 1px solid transparent; flex-shrink: 0; }
+        .ov-chip:not(.is-on) .ov-swatch { border-color: #c3c2b7; height: 1px; }
+        .ov-hint { font-size: 12px; color: #8A6D00; }
+        .ov-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+        .ov-card__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; }
+        .ov-card__head span { font-size: 11.5px; color: var(--text-dim); }
+        .ov-empty { padding: 40px 0; text-align: center; color: var(--text-dim); font-size: 13px; }
+        .ov-note { font-size: 11.5px; color: var(--text-dim); }
+        .ov-tip { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.08); font-size: 12px; min-width: 200px; }
+        .ov-tip__time { font-weight: 700; margin-bottom: 6px; }
+        .ov-tip__row { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 8px; align-items: center; padding: 2px 0; }
+        .ov-tip__score { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+        .ov-tip__hint { margin-top: 6px; color: var(--text-dim); font-size: 11px; }
+        .ov-table-wrap { overflow-x: auto; }
+        .ov-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+        .ov-table th, .ov-table td { padding: 4px 6px; text-align: center; border-bottom: 1px solid var(--tint); white-space: nowrap; }
+        .ov-table thead th { color: var(--text-dim); font-weight: 600; font-variant-numeric: tabular-nums; }
+        .ov-table tbody th, .ov-table thead th:first-child { text-align: left; font-weight: 600; width: 120px; }
+        .ov-rowhead { display: inline-flex; align-items: center; gap: 6px; }
+        .ov-cell { border: 1px solid; background: var(--panel); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
+        .ov-cell:hover { background: var(--tint); }
+        .ov-cell--empty { color: #c3c2b7; }
         .window-card { margin-top: 18px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
         .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
         .window-card__phase { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
@@ -1345,12 +1380,35 @@ export default function RiskDashboard() {
       </div>
 
       {!isMock && (
+        <div className="view-tabs" role="tablist" aria-label="화면 선택">
+          <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "is-on" : ""} onClick={() => setView("overview")}>
+            개요 그래프
+          </button>
+          <button role="tab" aria-selected={view === "detail"} className={view === "detail" ? "is-on" : ""} onClick={() => setView("detail")}>
+            구간 상세 분석{userFilter ? ` · ${userFilter}` : ""}
+          </button>
+        </div>
+      )}
+
+      {!isMock && view === "overview" && (
+        <RiskOverview key={dateFilter || dates[0]?.date || "none"} apiBase={API_BASE} dates={dates} date={dateFilter || dates[0]?.date || ""}
+          onDateChange={setDateFilter} version={lastOkAt?.getTime() ?? 0}
+          onOpenWindow={(w) => {
+            setDateFilter(new Date(w.startedAtMs + 9 * 3600 * 1000).toISOString().slice(0, 10)); // KST 날짜
+            setUserFilter(w.user);
+            setSelectedId(w.id);
+            setView("detail");
+          }} />
+      )}
+
+      {!isMock && view === "detail" && (
         <details className="tester-fold">
           <summary>프롬프트 직접 테스트</summary>
           <PromptTester apiBase={API_BASE} />
         </details>
       )}
 
+      {(isMock || view === "detail") && <>
       {status === "error" && events.length > 0 && (
         <div className="stale-banner">
           <WifiOff size={15} />
@@ -1601,6 +1659,7 @@ export default function RiskDashboard() {
           </div>
         )}
       </div>
+      </>}
 
       <HoverTooltip session={hover.session} pos={hover.pos} />
     </div>
