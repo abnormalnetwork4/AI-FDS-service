@@ -12,7 +12,7 @@ from test_live import observation
 
 @pytest.fixture(scope="module")
 def engine():
-    return AllInOneDataRiskEngine(Path(__file__).resolve().parents[1] / "models" / "all-in-one")
+    return AllInOneDataRiskEngine(Path(__file__).resolve().parents[2] / "model" / "prompt" / "all-in-one")
 
 
 def test_actual_model_event_api_persistence_and_dashboard(engine, tmp_path):
@@ -60,7 +60,7 @@ def test_default_startup_loads_model_and_missing_model_fails(tmp_path, monkeypat
 
 def test_corrupt_artifact_rejected_before_loading(tmp_path):
     import json
-    source = Path(__file__).resolve().parents[1] / "models" / "all-in-one"
+    source = Path(__file__).resolve().parents[2] / "model" / "prompt" / "all-in-one"
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     for name in manifest["files"]:
