@@ -8,7 +8,8 @@
   이 스크립트는 점수나 등급을 보내지 않습니다.
 - 네트워크 모델은 24개 행동 피처의 조합으로 판정합니다. bytes_sent나 file_count를 크게 잡아도
   모델이 반드시 위험 유형으로 판정하는 것은 아닙니다. 반대로 작은 입력이 위협으로 판정될 수도 있습니다.
-- 회사 구간은 같은 DB의 최근 1시간 기록(모든 사용자)을 피처로 씁니다. 서버 DB 상태에 따라 결과가 달라집니다.
+- 위험 구간은 사용자·단말별 5분 창입니다(네트워크 모델 학습 단위와 같음). 같은 사용자의 최근 1시간 기록도
+  피처로 쓰므로 서버 DB에 demo-user의 이전 기록이 있으면 결과가 달라집니다.
 - 목표와 실제 등급이 다르면 '목표와 실제 결과가 다름'으로 표시하고 종료 코드 1을 반환합니다.
   값을 자동으로 바꾸거나 등급을 덮어쓰지 않습니다. 필요하면 아래 시나리오 입력값을 직접 고친 뒤
   새 날짜(--date)로 다시 실행하세요.
@@ -19,6 +20,7 @@
     .\\.venv\\Scripts\\python.exe examples\\video_demo.py --date 2026-10-01   # 과거의 다른 날짜 구간 사용
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -31,6 +33,8 @@ from uuid import uuid4
 KST = timezone(timedelta(hours=9))
 USER_ID = "demo-user"
 DEVICE_ID = "demo-pc"
+# --with-colleague 옵션: 같은 시간대에 평범한 업무만 하는 두 번째 가상 사용자. 구간이 사용자별로 나뉘는 것을 보여 줍니다.
+COLLEAGUE = ("colleague-user", "colleague-pc")
 PROVIDER = "internal-ai"
 APPROVED = "ai-gateway.corp.internal"      # 회사 승인 AI Gateway (가상)
 UNAPPROVED = "api.unknown-ai.example"      # 미승인 외부 AI 목적지 (가상, .example 도메인)
@@ -110,14 +114,15 @@ def slot_start(day, minute):
     return datetime(day.year, day.month, day.day, DEMO_HOUR, 0, tzinfo=KST) + timedelta(minutes=minute)
 
 
-def window_id(start):
-    # 서버 app/company.py의 company_slot()과 같은 규칙: UTC 기준 5분 단위 시작 시각
-    return "company-" + start.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+def window_id(start, user_id=USER_ID, device_id=DEVICE_ID):
+    # 서버 app/windows.py의 window_slot()과 같은 규칙: 사용자·단말별, UTC 기준 5분 단위 시작 시각
+    key = hashlib.sha256(f"{user_id}\0{device_id}".encode()).hexdigest()[:16]
+    return f"window-{start.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}-{key}"
 
 
-def build_bodies(scenario, start):
+def build_bodies(scenario, start, user_id=USER_ID, device_id=DEVICE_ID, events=None):
     bodies = []
-    for item in scenario["events"]:
+    for item in scenario["events"] if events is None else events:
         if not 0 <= item["at"] < 300:
             raise ValueError(f"{scenario['name']}: at={item['at']}초는 5분 구간 밖입니다.")
         at = start + timedelta(seconds=item["at"])
@@ -125,7 +130,7 @@ def build_bodies(scenario, start):
             # 학습 데이터처럼 AI 요청 1건 = 통신 세션 1개로 관측합니다.
             "id": f"video-demo-{scenario['name']}-{uuid4()}",
             "session_id": f"video-demo-session-{scenario['name']}-{uuid4()}",
-            "user_id": USER_ID, "device_id": DEVICE_ID, "occurred_at": at.isoformat(),
+            "user_id": user_id, "device_id": device_id, "occurred_at": at.isoformat(),
             "completed_at": (at + timedelta(seconds=item["latency"])).isoformat(),
             "destination": item["destination"], "source": "application_log",
             "provider": PROVIDER, "channel": "api",
@@ -179,22 +184,39 @@ def check_server(api):
 
 
 def find_conflicts(api, day):
-    # 시연 구간 4개와 그 직전 1시간에 이미 기록이 있으면 결과가 섞이므로 전송하지 않습니다.
+    # 시연 사용자들의 시연 구간 4개와 그 직전 1시간에 이미 기록이 있으면 결과가 섞이므로 전송하지 않습니다.
     first = slot_start(day, 0)
     conflicts = []
-    for minutes in range(-60, 20, 5):
-        wid = window_id(first + timedelta(minutes=minutes))
-        status, _ = api.call("GET", f"/api/v1/company-windows/{wid}")
-        if status == 200:
-            conflicts.append(wid)
+    for user_id, device_id in ((USER_ID, DEVICE_ID), COLLEAGUE):
+        for minutes in range(-60, 20, 5):
+            wid = window_id(first + timedelta(minutes=minutes), user_id, device_id)
+            status, _ = api.call("GET", f"/api/v1/risk-windows/{wid}")
+            if status == 200:
+                conflicts.append(wid)
     return conflicts
+
+
+def print_company_slots(api, day):
+    """회사 시간대 요약(서버 계산 결과 그대로). 회사 점수를 따로 만들지 않고 사용자 구간 등급만 셉니다."""
+    status, page = api.call("GET", "/api/v1/dashboard/company-slots?limit=200")
+    if status != 200:
+        return
+    starts = {slot_start(day, s["minute"]).astimezone(timezone.utc) for s in SCENARIOS}
+    print("\n=== 회사 시간대 요약 (사용자 구간 등급 집계, 회사 점수 아님) ===")
+    for slot in sorted(page["slots"], key=lambda x: x["start"]):
+        if datetime.fromisoformat(slot["start"]) not in starts:
+            continue
+        counts = " ".join(f"{GRADE_LABELS[g]} {n}" for g, n in slot["grade_counts"].items())
+        top = f"{slot['top_user_id']} {slot['top_grade']} {fmt(slot['top_score'])}" if slot["top_window_id"] else "없음"
+        print(f"  {datetime.fromisoformat(slot['start']).astimezone(KST):%H:%M}  사용자 {slot['user_count']}명 · "
+              f"[{counts}] · 미판정 {slot['pending_window_count']} · 최고 등급 구간: {top}")
 
 
 def wait_window(api, wid, timeout):
     # 수집 요청 안에서 구간을 재계산합니다. 백그라운드 재계산이 남아 있으면 잠시 기다립니다.
     deadline = time.monotonic() + timeout
     while True:
-        status, window = api.call("GET", f"/api/v1/company-windows/{wid}")
+        status, window = api.call("GET", f"/api/v1/risk-windows/{wid}")
         if status != 200:
             raise RuntimeError(f"구간 조회 실패 {wid}: HTTP {status} {window}")
         settled = window["network_revision"] == window["revision"] and window["fusion_status"] != "pending"
@@ -245,7 +267,7 @@ def report(scenario, sent, window):
         f"시나리오: {scenario['name']}   ({start:%Y-%m-%d %H:%M}~{end:%H:%M} KST)",
         f"  입력 의도              : {scenario['intent']}",
         f"  전송한 이벤트 수       : {sent}",
-        f"  company_window_id      : {window['id']}",
+        f"  risk_window_id         : {window['id']}  (사용자 {window['user_id']} · 단말 {window['device_id']})",
         f"  프롬프트 분석 건수     : 완료 {window['prompt_complete_count']} / 전체 {window['capture_count']}"
         f" (미판정 {window['prompt_missing_count']}, 오류 {window['prompt_error_count']})",
         f"  프롬프트 최고 점수     : {fmt(window['prompt_max_score'], ' / 60')}  ← 통합 점수에는 최고 점수 1건만 반영",
@@ -267,15 +289,23 @@ def report(scenario, sent, window):
                                    window_id=window["id"], score=window["score"])
 
 
-def run_scenario(api, scenario, day, timeout):
-    start = slot_start(day, scenario["minute"])
-    bodies = build_bodies(scenario, start)
+def post_all(api, bodies):
     wids = set()
     for body in bodies:
         status, result = api.call("POST", "/api/v1/ingest/events", body)
         if status != 200:
             raise RuntimeError(f"이벤트 전송 실패 {body['id']}: HTTP {status} {json.dumps(result, ensure_ascii=False)}")
-        wids.add(result["company_window_id"])
+        wids.add(result["risk_window_id"])
+    return wids
+
+
+def run_scenario(api, scenario, day, timeout, colleague=False):
+    start = slot_start(day, scenario["minute"])
+    if colleague:
+        # 동료의 평범한 요청은 별도 사용자 구간에 들어가며 demo-user 점수에 섞이지 않습니다.
+        post_all(api, build_bodies(scenario, start, *COLLEAGUE, events=NORMAL))
+    bodies = build_bodies(scenario, start)
+    wids = post_all(api, bodies)
     if wids != {window_id(start)}:
         raise RuntimeError(f"이벤트가 예상 구간 {window_id(start)}이 아닌 곳에 들어갔습니다: {sorted(wids)}")
     text, result = report(scenario, len(bodies), wait_window(api, wids.pop(), timeout))
@@ -309,6 +339,8 @@ def main(argv=None, api=None):
     parser.add_argument("--date", type=date.fromisoformat, default=datetime.now(KST).date(),
                         help="시연 구간 날짜(KST, YYYY-MM-DD). 기본: 오늘. 과거 날짜도 됩니다. 10:00~10:20 구간을 사용합니다.")
     parser.add_argument("--timeout", type=float, default=30, help="구간 재계산 대기 시간(초)")
+    parser.add_argument("--with-colleague", action="store_true",
+                        help="같은 시간대에 평범한 업무를 하는 동료 사용자(colleague-user)도 함께 전송")
     args = parser.parse_args(argv)
     api = api or Api(args.base_url)
     try:
@@ -321,7 +353,8 @@ def main(argv=None, api=None):
             return 3
         print(f"시연 날짜: {args.date} (KST)  사용자: {USER_ID}  단말: {DEVICE_ID}")
         print("※ 시나리오 이름은 목표 등급입니다. 실제 등급은 모델 결과이며 다를 수 있습니다.")
-        results = [run_scenario(api, scenario, args.date, args.timeout) for scenario in SCENARIOS]
+        results = [run_scenario(api, scenario, args.date, args.timeout, args.with_colleague) for scenario in SCENARIOS]
+        print_company_slots(api, args.date)
     except ServerUnavailable as error:
         print(f"\n[오류] FDS API 서버({args.base_url})에 연결할 수 없습니다: {error}", file=sys.stderr)
         print("다른 PowerShell 창에서 서버를 먼저 실행하세요:", file=sys.stderr)

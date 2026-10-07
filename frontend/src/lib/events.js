@@ -95,8 +95,11 @@ export function normalizeEvent(raw) {
   };
   return {
     ...raw, isReal: true, id: String(raw.id), sessionId: raw.session_id,
-    user: raw.scope === 'company' ? '회사 전체' : raw.user ?? '-',
-    dept: raw.scope === 'company' ? `5분 구간 · ${raw.capture_count ?? 0}건` : raw.device_id ?? '-',
+    // 사용자·단말 5분 구간이 기본 단위입니다. scope 'company'는 이전 버전 회사 합산 구간(보존 기록)입니다.
+    user: raw.scope === 'company' ? '회사 전체(이전 버전)' : raw.user ?? '-',
+    dept: raw.scope === 'company' ? `5분 구간 · ${raw.capture_count ?? 0}건`
+      : raw.scope === 'user_device' ? `${raw.device_id ?? '-'} · 5분 · ${raw.capture_count ?? 0}건` : raw.device_id ?? '-',
+    windowStart: typeof raw.window_start === 'string' ? raw.window_start : null,
     startedAtMs, endedAtMs: dateMs(raw.ended_at),
     connectedAt: startedAtMs === null ? '--' : new Date(startedAtMs).toLocaleString('ko-KR', { hour12: false }),
     grade: normalizeGrade(raw.grade ?? raw.final_grade),
@@ -116,7 +119,7 @@ export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1) {
   const count = Math.max(1, Math.min(MAX_PAGES, Math.trunc(pages) || 1));
   const one = async (index) => {
     const offset = index ? `&offset=${index * PAGE_SIZE}` : '';
-    const response = await fetcher(`${base}/api/v1/dashboard/company-windows?limit=${PAGE_SIZE}${offset}`, { signal });
+    const response = await fetcher(`${base}/api/v1/dashboard/risk-windows?limit=${PAGE_SIZE}${offset}`, { signal });
     if (!response.ok) throw new Error(`서버 응답 오류 (HTTP ${response.status})`);
     const page = await response.json();
     if (!Array.isArray(page.events) || !Number.isInteger(page.total)) throw new Error('올바르지 않은 대시보드 응답');
@@ -132,12 +135,13 @@ export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1) {
   return { events, total: Math.max(...results.map((page) => page.total)) };
 }
 
-// ---------------------------------------------------------------- 회사 5분 구간 설명
+// ---------------------------------------------------------------- 사용자·단말 5분 구간 설명
 // 화면 안내 문구입니다. 점수 정책을 바꾸지 않으며 backend/app/dashboard.py의 같은 문구와 맞춥니다.
 export const SCOPE_NOTE = [
-  '이 결과는 한 명의 개인 위험도가 아니라, 한 회사의 5분 구간 전체 위험도입니다.',
-  '현재 시연은 한 명의 가상 사용자로 구성되어 있습니다.',
-  '실제 모델 학습 데이터가 여러 사용자의 5분 집계라면, 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.',
+  '이 결과는 한 사용자·한 단말의 5분 구간 위험도이며, 보안 담당자의 검토 우선순위용 지표입니다(위반 확정 아님).',
+  '네트워크 모델의 학습 단위(사용자별 5분 창)와 같은 기준으로 판정합니다.',
+  '같은 시간대 회사 요약은 사용자 구간 등급을 셀 뿐, 별도의 회사 점수를 만들지 않습니다.',
+  '현재 시연은 가상 사용자로 구성되어 있으므로, 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.',
 ];
 export const PROMPT_MAX_NOTE = '통합 점수에는 구간 안 프롬프트 중 최고 점수 한 건만 반영합니다. '
   + '합산하면 요청 수에 따라 점수가 부풀고, 평균하면 위험 프롬프트 한 건이 정상 요청에 묻히기 때문입니다. '
@@ -180,4 +184,23 @@ export function networkBreakdownText(breakdown) {
   if (!b) return '네트워크 점수 구성 정보 없음';
   const terms = b.parts.map((p, i) => `${i ? '+ ' : '= '}${p.label} ${p.value == null ? '미제공' : formatScore(p.value)}`);
   return [`네트워크 점수 ${formatScore(b.total)}점`, ...terms].join(' ');
+}
+
+// 같은 5분 시간대의 사용자 구간 요약. 화면에 불러온 구간만 셉니다. 점수를 합산·평균하지 않고 등급 수만 셉니다.
+// 미판정·오류 구간은 정상으로 세지 않습니다. 정렬: 높은 등급 → 높은 점수 → ID.
+const RANK = { normal: 0, caution: 1, warning: 2, danger: 3 };
+export function sameSlotSummary(events, selected) {
+  if (!selected?.windowStart) return null;
+  const windows = events.filter((e) => e.windowStart === selected.windowStart && e.scope === 'user_device');
+  const counts = { normal: 0, caution: 0, warning: 0, danger: 0 };
+  let pending = 0;
+  let error = 0;
+  for (const w of windows) {
+    if (w.status === 'error') error += 1;
+    else if (w.grade && w.grade in counts) counts[w.grade] += 1;
+    else pending += 1;
+  }
+  const order = (w) => (w.grade && w.status !== 'error' ? RANK[w.grade] : -1);
+  const sorted = [...windows].sort((a, b) => order(b) - order(a) || (b.score ?? -1) - (a.score ?? -1) || (a.id < b.id ? -1 : 1));
+  return { windows: sorted, counts, pending, error, userCount: new Set(windows.map((w) => w.user)).size };
 }

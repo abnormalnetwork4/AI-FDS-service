@@ -18,9 +18,9 @@ flowchart LR
 
 ## 현재 구현
 
-관측 세션·AI 사용 로그 수신, 사용자·단말·시간 연결 검증, 회사 전체 고정 5분 집계, Data/Network 엔진 연결, 재전송 중복 방지, 구간별 결과·통계 조회를 구현했습니다. 한 서버/DB는 한 회사 전용입니다.
+관측 세션·AI 사용 로그 수신, 사용자·단말·시간 연결 검증, 사용자·단말별 고정 5분 집계, Data/Network 엔진 연결, 재전송 중복 방지, 구간별 결과·통계 조회를 구현했습니다. 한 서버/DB는 한 회사 전용입니다.
 
-Regression 프롬프트 모델(TF-IDF + LogisticRegression 네 분류기, 임계값 0.45 초과)과 [`model/network`](../model/network/)의 XGBoost Network 모델을 연결했습니다. 회사 전체 고정 5분 구간에서 **프롬프트 최고 점수(60점) + 전체 네트워크 점수 × 0.4(40점)**로 통합합니다. 개인 점수가 아닙니다. 구간 내 프롬프트가 하나라도 미판정·오류거나 네트워크가 미완료면 통합 점수·등급은 `null`입니다. `confidence`도 정의가 없어 `null`입니다. Stub 엔진은 미판정입니다. 개별 Assessment는 프롬프트 결과와 `company_window_id`를 제공하고 회사 결과는 별도 조회합니다. 상세 계약은 [통합 등급 API](grade-api-contract.md)를 참고하세요.
+Regression 프롬프트 모델(TF-IDF + LogisticRegression 네 분류기, 임계값 0.45 초과)과 [`model/network`](../model/network/)의 XGBoost Network 모델을 연결했습니다. **사용자·단말별 고정 5분 구간**에서 **프롬프트 최고 점수(60점) + 그 사용자의 네트워크 점수 × 0.4(40점)**로 통합합니다. 네트워크 모델이 사용자별 5분 창으로 학습됐기 때문입니다(학습 창 ID `..._user_001_w02`). 회사 화면은 같은 시간대 사용자 구간의 등급을 셀 뿐 회사 점수를 따로 만들지 않습니다. 점수는 보안 담당자의 검토 우선순위이며 위반 확정이 아닙니다. 구간 내 프롬프트가 하나라도 미판정·오류거나 네트워크가 미완료면 통합 점수·등급은 `null`입니다. `confidence`도 정의가 없어 `null`입니다. Stub 엔진은 미판정입니다. 개별 Assessment는 프롬프트 결과와 `risk_window_id`를 제공하고 구간 결과는 별도 조회합니다. v0.6~0.7의 회사 전체 합산 구간(`company_assessment`)은 삭제하지 않고 보존하며 `/company-windows`로 읽기만 할 수 있습니다. 상세 계약은 [통합 등급 API](grade-api-contract.md)를 참고하세요.
 
 ## 설치·실행
 
@@ -72,9 +72,9 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 
 `provider`와 `prompt`는 선택 항목입니다. 프롬프트가 있으면 `source: application_log`와 `provider`가 필요합니다. 네트워크 메타데이터만 있는 경우에는 두 필드를 생략할 수 있습니다. 내부 저장용 관측 ID와 원래 `session_id`를 분리하며, 대시보드는 원래 세션 ID를 보여줍니다. 기본 세션 조회의 `parent_session_id`로 원래 세션을 확인할 수 있습니다.
 
-자료 저장 후 개별 프롬프트를 분석하고 회사 전체 5분 네트워크를 갱신합니다. 10:00~10:05처럼 고정된 반개구간을 사용하며 입력마다 잠정 결과를 갱신합니다. 종료 전 `phase: open`, 종료 후 `closed`입니다. 백그라운드 작업은 종료 표시와 미처리 네트워크 재계산을 수행합니다. 60분 별도 추론은 호출하지 않고 1시간 이력은 네트워크 입력 피처로 반영합니다.
+자료 저장 후 개별 프롬프트를 분석하고 해당 사용자·단말의 5분 네트워크를 갱신합니다. 10:00~10:05처럼 고정된 반개구간을 사용하며 입력마다 잠정 결과를 갱신합니다. 종료 전 `phase: open`, 종료 후 `closed`입니다. 백그라운드 작업은 종료 표시와 미처리 네트워크 재계산을 수행합니다. 60분 별도 추론은 호출하지 않고 1시간 이력은 네트워크 입력 피처로 반영합니다.
 
-대시보드는 `GET /api/v1/dashboard/stream`의 SSE changed 알림을 받아 `/dashboard/company-windows`를 재조회합니다. Assessment 및 회사 구간 INSERT/UPDATE 때 DB 변경 번호가 올라갑니다. `CompanyRepository._refresh_company_fusion()`이 최고 프롬프트를 선택하고 `fuse_parts()` → `rs.integrate()`로 통합합니다. 최신 입력 버전과 일치하는 네트워크 결과만 저장합니다. SSE는 변경 번호만 전송하고 프록시의 응답 버퍼링은 꺼야 합니다.
+대시보드는 `GET /api/v1/dashboard/stream`의 SSE changed 알림을 받아 `/dashboard/risk-windows`를 재조회합니다. Assessment 및 위험 구간 INSERT/UPDATE 때 DB 변경 번호가 올라갑니다. `WindowRepository._refresh_window_fusion()`이 최고 프롬프트를 선택하고 `fuse_parts()` → `rs.integrate()`로 통합합니다. 최신 입력 버전과 일치하는 네트워크 결과만 저장합니다. SSE는 변경 번호만 전송하고 프록시의 응답 버퍼링은 꺼야 합니다.
 
 수집 API 응답은 전체 분석 후 반환됩니다. 원본 AI 통신과 분리된 수집기에서 전송하고, AI 요청 경로가 이 API의 응답을 기다리게 하지 마세요. 큐·자동 재시도·추론 시간 제한·부하 제어는 후속 구현 대상입니다. 처리 중 프로세스가 종료되면 같은 이벤트를 재전송해야 하며, 저장된 부분 결과를 유지하고 나머지를 확정합니다.
 
@@ -101,11 +101,15 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 .\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01
 ```
 
-출력: 시나리오, 전송 이벤트 수, `company_window_id`, 프롬프트 분석 건수, 프롬프트 최고 점수와 근거 capture/user ID, 네트워크 점수와 구성, 반영 점수, 통합 점수, 실제 네트워크 판정 유형, 목표 등급·실제 등급·판정.
+출력: 시나리오, 전송 이벤트 수, `risk_window_id`(사용자·단말), 프롬프트 분석 건수, 프롬프트 최고 점수와 근거 capture/user ID, 네트워크 점수와 구성, 반영 점수, 통합 점수, 실제 네트워크 판정 유형, 목표 등급·실제 등급·판정.
 
-**시나리오 이름은 목표일 뿐 결과를 보장하지 않습니다.** 네트워크 모델은 24개 행동 피처의 조합으로 판정하므로 `bytes_sent`·`file_count`를 키워도 반드시 위험 유형이 되지 않고, 작은 입력이 위협으로 판정될 수도 있습니다. 회사 구간은 같은 DB의 최근 1시간 기록(모든 사용자)을 피처로 쓰므로 DB 상태에 따라서도 달라집니다(예: caution 입력을 조금 바꾸면 기존 이력 유무에 따라 normal·N3·N5가 갈렸습니다). 목표와 실제가 다르면 "목표와 실제 결과가 다름"을 표시하고 종료 코드 1을 반환합니다. 실제 등급이 미판정(null)이어도 성공으로 보지 않습니다. 스크립트는 값을 자동 조정하거나 등급을 덮어쓰지 않으므로, 필요하면 파일 위쪽 시나리오 입력값을 직접 고친 뒤 다른 날짜로 다시 실행합니다.
+**시나리오 이름은 목표일 뿐 결과를 보장하지 않습니다.** 네트워크 모델은 24개 행동 피처의 조합으로 판정하므로 `bytes_sent`·`file_count`를 키워도 반드시 위험 유형이 되지 않고, 작은 입력이 위협으로 판정될 수도 있습니다. 같은 사용자의 최근 1시간 기록도 피처로 쓰므로 DB에 demo-user의 이전 기록이 있으면 결과가 달라질 수 있습니다(이전 회사 합산 구조에서는 caution 입력을 조금 바꾸자 기존 이력 유무에 따라 normal·N3·N5가 갈렸습니다). 목표와 실제가 다르면 "목표와 실제 결과가 다름"을 표시하고 종료 코드 1을 반환합니다. 실제 등급이 미판정(null)이어도 성공으로 보지 않습니다. 스크립트는 값을 자동 조정하거나 등급을 덮어쓰지 않으므로, 필요하면 파일 위쪽 시나리오 입력값을 직접 고친 뒤 다른 날짜로 다시 실행합니다.
 
-현재 시연은 한 명의 가상 사용자로 구성됩니다. 결과는 개인 위험도가 아니라 회사 5분 구간 전체 위험도이며, 모델 학습 데이터가 여러 사용자의 5분 집계라면 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.
+결과는 `demo-user`·`demo-pc`의 5분 구간 위험도입니다. `--with-colleague`를 붙이면 같은 시간대에 평범한 업무만 하는 `colleague-user`도 보내며, 두 사용자의 구간이 서로 섞이지 않는 것과 회사 시간대 요약(사용자 구간 등급 집계)을 함께 출력합니다. 가상 데이터이므로 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
+
+```powershell
+.\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01 --with-colleague
+```
 
 ### 완료된 세션을 전송하는 기존 경로
 
@@ -143,9 +147,11 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | POST | `/api/v1/ingest/captures` | 관측 자료 저장 후 사후 분석 |
 | GET | `/api/v1/captures` | 수집 기록·프롬프트 확보 상태 |
 | GET | `/api/v1/assessments` | 캡처별 분석 묶음 |
-| GET | `/api/v1/assessments/{capture_id}` | 개별 프롬프트 결과 + company_window_id |
-| GET | `/api/v1/company-windows/{window_id}` | 회사 전체 5분 통합 결과. `prompt_scores`(구간 안 모든 프롬프트 점수·상태)와 `network_score_breakdown`(네트워크 점수 구성) 포함 |
-| GET | `/api/v1/dashboard/company-windows` | 화면용 회사 5분 구간 목록 |
+| GET | `/api/v1/assessments/{capture_id}` | 개별 프롬프트 결과 + risk_window_id |
+| GET | `/api/v1/risk-windows`, `/api/v1/risk-windows/{window_id}` | 사용자·단말 5분 통합 결과(`user_id` 필터). `prompt_scores`와 `network_score_breakdown` 포함 |
+| GET | `/api/v1/dashboard/risk-windows` | 화면용 사용자 구간 목록. `user_id`, `start`(같은 시간대) 필터 |
+| GET | `/api/v1/dashboard/company-slots` | 회사 시간대 요약: 사용자 수, 등급별 구간 수, 미판정·오류 수, 최고 등급 구간. 회사 점수를 합산·평균하지 않음 |
+| GET | `/api/v1/company-windows`, `/api/v1/company-windows/{id}` | (이전 버전, 읽기 전용) 보존된 회사 전체 합산 구간 |
 | POST / GET | `/api/v1/network-sessions` | 세션 개별 등록/조회 |
 | POST / GET | `/api/v1/ai-usage-events` | AI 사용 이벤트 개별 등록/조회 |
 | POST / GET | `/api/v1/behavior-windows` | 지정 구간 집계 생성/조회 |
@@ -154,9 +160,9 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | GET | `/api/v1/risks`, `/api/v1/risks/{risk_id}` | 엔진 결과 목록/상세 |
 | GET | `/api/v1/dashboard/summary` | 수집량·분석 건수·완료 점수 평균 |
 | GET | `/api/v1/dashboard/events` | 캡처별 화면 데이터와 전체 건수 |
-| GET | `/api/v1/dashboard/explanation?capture_id=...` | 저장된 분석 근거 요약 |
+| GET | `/api/v1/dashboard/explanation?capture_id=...` 또는 `?window_id=...` | 저장된 분석 근거 요약 |
 
-목록은 `limit`(기본 50, 최대 200), `offset`을 지원하며 개별 관측 목록만 `user_id` 필터를 제공합니다. `/network-sessions`, `/ai-usage-events`의 개별 등록과 직접 프롬프트 테스트는 회사 자동 통합에 포함하지 않습니다. 자동 분석은 `/ingest/captures`, `/ingest/events`에서 실행합니다. 대시보드 평균은 통합 완료 회사 구간을 한 번씩 집계하며 `graded_window_count`를 사용합니다. React 화면은 `dashboard/company-windows`로 최근 구간을 조회합니다.
+목록은 `limit`(기본 50, 최대 200), `offset`을 지원하며 개별 관측 목록만 `user_id` 필터를 제공합니다. `/network-sessions`, `/ai-usage-events`의 개별 등록과 직접 프롬프트 테스트는 구간 자동 통합에 포함하지 않습니다. 자동 분석은 `/ingest/captures`, `/ingest/events`에서 실행합니다. 대시보드 평균은 통합 완료 사용자 구간을 한 번씩 집계하며 `risk_window_count`, `graded_window_count`를 사용합니다. React 화면은 `dashboard/risk-windows`로 최근 구간을 조회합니다.
 
 ## 수집·분석 처리 기준
 
@@ -166,7 +172,7 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 
 수집 API는 분석까지 수행한 뒤 응답합니다. 이것은 원본 AI 통신과 분리된 수집기→FDS 통신입니다. 수집기 버퍼·영속 작업 큐·자동 재시도는 별도 구현 대상입니다.
 
-AI 사용 로그가 있으면 요청 발생 시각, 없으면 세션 시작 시각으로 고정 5분 구간을 선택합니다. 전송량도 같은 시각에 귀속하며 긴 세션의 바이트를 임의로 분할하지 않습니다. 지연 수신은 원래 구간과 이후 1시간 이력에 영향을 받는 구간을 재계산합니다. 서버 재시작 시 기존 관측·저장된 프롬프트 결과로 회사 구간을 구성하고 네트워크를 재계산합니다. 개인별 기준선은 사용하지 않습니다.
+AI 사용 로그가 있으면 요청 발생 시각, 없으면 세션 시작 시각으로 고정 5분 구간을 선택합니다. 전송량도 같은 시각에 귀속하며 긴 세션의 바이트를 임의로 분할하지 않습니다. 5분 피처는 같은 사용자·같은 단말 기록, 최근 1시간 이력 피처(`user_*_observed_1h`)는 같은 사용자의 모든 단말 기록으로 계산합니다(다른 사용자 기록은 포함하지 않음). 지연 수신은 원래 구간과 같은 사용자의 이후 1시간 이력에 영향을 받는 구간을 재계산합니다. 서버 재시작 시 기존 관측·저장된 프롬프트 결과로 사용자 구간을 구성하고 네트워크를 재계산합니다(이전 회사 구간 기록은 보존). 개인별 기준선(평소 패턴 비교)은 사용하지 않으며 모든 사용자에게 같은 모델을 씁니다.
 
 ## 프롬프트·모델 연결
 

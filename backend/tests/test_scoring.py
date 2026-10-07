@@ -157,14 +157,14 @@ def test_api_grade_score_override_and_summary_persist(tmp_path):
         saved = response.json()
         assert saved["final_grade"] is None and saved["score"] is None
         assert client.post("/api/v1/ingest/events", json=body).json() == saved
-        row = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
+        row = client.get("/api/v1/dashboard/risk-windows").json()["events"][0]
         assert row["grade"] == "danger" and row["score"] == 56.2
         assert row["override"] and row["override_reasons"]
         assert row["confidence"] is None
         assert all("weight" not in f for f in row["prompt_reasons"])
         summary = client.get("/api/v1/dashboard/summary").json()
         assert summary["graded_event_count"] == 0 and summary["graded_window_count"] == 1 and summary["average_risk_score"] == 56.2
-        explanation = client.get("/api/v1/dashboard/explanation", params={"window_id": saved["company_window_id"]}).json()["text"]
+        explanation = client.get("/api/v1/dashboard/explanation", params={"window_id": saved["risk_window_id"]}).json()["text"]
         assert "등급: danger" in explanation and "56.2/60" in explanation
 
 

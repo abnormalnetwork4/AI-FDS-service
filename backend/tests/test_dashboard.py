@@ -21,11 +21,11 @@ def test_dashboard_pending_and_window_identity(tmp_path):
         assert row["status"] == "pending"
         assert row["session_id"] == "session-cap-1"
         assert row["started_at"] == row["ended_at"]
-        assert row["network_reasons"] == []  # 회사 점수를 개인에게 붙이지 않습니다.
-        company = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
-        assert len(company["network_reasons"]) == 6
-        assert len({r["id"] for r in company["network_reasons"]}) == 6
-        assert {r["window_minutes"] for r in company["network_reasons"]} == {5}
+        assert row["network_reasons"] == []  # 구간 네트워크 점수를 개별 관측에 붙이지 않습니다.
+        window = client.get("/api/v1/dashboard/risk-windows").json()["events"][0]
+        assert len(window["network_reasons"]) == 6
+        assert len({r["id"] for r in window["network_reasons"]}) == 6
+        assert {r["window_minutes"] for r in window["network_reasons"]} == {5}
         assert all(r["score"] is None for r in row["prompt_reasons"])
         summary = client.get("/api/v1/dashboard/explanation", params={"capture_id": "cap-1"}).json()
         assert summary["source"] == "stored"

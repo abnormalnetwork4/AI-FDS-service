@@ -5,7 +5,7 @@ import json
 from .contracts import Assessment, CaptureIngest, CaptureRecord
 from .repository import Repository
 from .schemas import OPTIONAL_EVENT_FIELDS, DataRiskRequest, Finding, RiskResult
-from .company import refresh_company
+from .windows import refresh_window
 
 
 def analyze_safely(engine, value, user_id, engine_name, event_id, window_id=None):
@@ -70,7 +70,7 @@ def ingest(repo: Repository, body: CaptureIngest, data_engine, network_engine):
     if existing["processing_state"] != "finished":
         result = data_analysis(body, data_engine, availability)
         repo.publish_result(body.id, "data", result)
-    # 재전송에서도 중단됐던 회사 분석은 재개합니다. 같은 입력 버전은 다시 저장하지 않습니다.
-    if existing.get("company_window_id"):
-        refresh_company(repo, existing["company_window_id"], network_engine)
+    # 재전송에서도 중단됐던 구간 분석은 재개합니다. 같은 입력 버전은 다시 저장하지 않습니다.
+    if existing.get("risk_window_id"):
+        refresh_window(repo, existing["risk_window_id"], network_engine)
     return repo.get("passive_assessment", body.id)

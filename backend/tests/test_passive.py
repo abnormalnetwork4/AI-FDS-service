@@ -125,8 +125,8 @@ def test_prior_capture_visible_while_its_model_is_running(tmp_path):
             assert len(repo.list("session")) == 1
             assert repo.get("passive_assessment", "first")["processing_state"] == "processing"
             result = ingest(repo, second, StubDataRiskEngine(), StubNetworkRiskEngine())
-            company = repo.get("company_assessment", result["company_window_id"])
-            for risk in [r for r in company["results"] if r["engine"] == "network"]:
+            window = repo.get("risk_window", result["risk_window_id"])
+            for risk in [r for r in window["results"] if r["engine"] == "network"]:
                 assert repo.get("window", risk["window_id"])["features"]["request_count"] == 2
         finally:
             release.set()

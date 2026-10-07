@@ -14,7 +14,7 @@ from .api import router
 from .engines import DataRiskEngine, NetworkRiskEngine, StubNetworkRiskEngine
 from .prompt_engine import configured_data_engine
 from .repository import ConflictError, ReferenceError, Repository
-from .company import refresh_dirty
+from .windows import refresh_dirty
 
 
 def default_network_engine() -> NetworkRiskEngine:
@@ -40,7 +40,7 @@ def create_app(
         # 서버 시작 때 한 번 실행됩니다. yield 이후 구간에는 향후 모델·연결 정리 코드를 둘 수 있습니다.
         repo.initialize()
         app.state.data_engine = data_engine if data_engine is not None else configured_data_engine()
-        repo.migrate_company_windows()
+        repo.migrate_risk_windows()
         stop = asyncio.Event()
 
         async def maintain_windows():

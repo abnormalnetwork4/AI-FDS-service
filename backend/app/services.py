@@ -13,18 +13,19 @@ def build_window(repo: Repository, request: WindowRequest) -> BehaviorWindow:
     return repo.save("window", compute_window(request, sessions, events))
 
 
-def compute_window(request: WindowRequest, sessions: list[NetworkSession], events: list[AIUsageEvent], *, company=False) -> BehaviorWindow:
+def compute_window(request: WindowRequest, sessions: list[NetworkSession], events: list[AIUsageEvent]) -> BehaviorWindow:
     # 계산만 수행하고 DB를 수정하지 않습니다. 자동 수집 경로에서도 재사용합니다.
     start = request.start.astimezone(timezone.utc)
     end = start + timedelta(minutes=request.duration_minutes)
-    user_sessions = [s for s in sessions if company or s.user_id == request.user_id]
-    user_events = [e for e in events if company or e.user_id == request.user_id]
+    # 학습 데이터와 같은 사용자별 창입니다. 최근 1시간 이력은 같은 사용자(모든 단말) 기록입니다.
+    user_sessions = [s for s in sessions if s.user_id == request.user_id]
+    user_events = [e for e in events if e.user_id == request.user_id]
     # 같은 사용자·단말에서 구간 시작 이상, 구간 끝 미만인 기록만 고릅니다.
     # 세션이 구간을 가로질러도 전체 전송량을 시작 시각에 귀속하는 기본 집계 방식입니다.
-    sessions = [s for s in user_sessions if (company or s.device_id == request.device_id) and start <= s.started_at < end]
-    events = [e for e in user_events if (company or e.device_id == request.device_id) and start <= e.occurred_at < end]
+    sessions = [s for s in user_sessions if s.device_id == request.device_id and start <= s.started_at < end]
+    events = [e for e in user_events if e.device_id == request.device_id and start <= e.occurred_at < end]
     window = BehaviorWindow(
-        id=str(uuid4()), user_id=request.user_id, device_id=request.device_id, scope="company" if company else "user_device",
+        id=str(uuid4()), user_id=request.user_id, device_id=request.device_id, scope="user_device",
         start=start, end=end, duration_minutes=request.duration_minutes,
         features=BehaviorFeatures(
             # 모델 입력용 숫자들입니다. 위험 점수나 탐지 결과가 아니라 관찰한 행동의 통계입니다.
@@ -69,7 +70,7 @@ def model_features(sessions, events, user_sessions, user_events, end, minutes) -
     peak = max((1 + sum(o_start <= s < o_end for j, (o_start, o_end) in enumerate(spans) if j != i)
                 for i, (s, _) in enumerate(spans)), default=0)
     upload, download = sum(s.bytes_sent for s in sessions), sum(s.bytes_received for s in sessions)
-    # 최근 1시간은 전달된 집계 범위의 전체 기록입니다. 회사 집계에서는 모든 사용자 기록을 포함합니다.
+    # 최근 1시간은 같은 사용자의 전체 기록(모든 단말)입니다. 다른 사용자 기록은 포함하지 않습니다.
     since = end - timedelta(hours=1)
     first = min([s.started_at for s in user_sessions if s.started_at < end] + [e.occurred_at for e in user_events if e.occurred_at < end], default=end)
     coverage = min(3600.0, max(0.0, (end - first).total_seconds()))
@@ -105,8 +106,8 @@ def dashboard(repo: Repository, user_id: str | None) -> DashboardSummary:
     # 60점/100점 엔진을 섞어 평균내지 않습니다. 유효한 통합 점수가 있는 이벤트만 집계합니다.
     results = [RiskResult.model_validate(row) for row in repo.list("risk", user_id)]
     scored = [r for r in results if r.status == "complete" and r.score is not None]
-    company_rows = repo.list("company_assessment") if user_id is None else []
-    scores = [r["score"] for r in company_rows
+    window_rows = repo.list("risk_window", user_id)
+    scores = [r["score"] for r in window_rows
               if r.get("fusion_status") == "complete" and r.get("score") is not None]
     return DashboardSummary(
         network_session_count=len({(s["user_id"], s["device_id"], s.get("parent_session_id") or s["id"])
@@ -116,6 +117,6 @@ def dashboard(repo: Repository, user_id: str | None) -> DashboardSummary:
         analysis_count=len(results),
         pending_analysis_count=sum(r.status == "pending" for r in results),
         scored_analysis_count=len(scored), graded_event_count=0,
-        company_window_count=len(company_rows), graded_window_count=len(scores),
+        company_window_count=0, risk_window_count=len(window_rows), graded_window_count=len(scores),
         average_risk_score=round(sum(scores) / len(scores), 2) if scores else None,
     )

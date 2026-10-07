@@ -1,4 +1,4 @@
-"""시연 스크립트와 회사 구간의 공개 필드(prompt_scores, network_score_breakdown) 검증."""
+"""시연 스크립트와 사용자·단말 구간의 공개 필드(prompt_scores, network_score_breakdown) 검증."""
 import importlib.util
 from datetime import date, datetime
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.collection import ingest
-from app.company import company_slot
+from app.windows import window_slot
 from app.contracts import EventIngest
 from app.main import create_app
 from app.repository import Repository
@@ -67,7 +67,7 @@ def test_four_scenarios_use_four_distinct_five_minute_windows():
         start = video_demo.slot_start(day, scenario["minute"])
         bodies = video_demo.build_bodies(scenario, start)
         assert bodies, scenario["name"]
-        slots = {company_slot(datetime.fromisoformat(b["occurred_at"])).id for b in bodies}
+        slots = {window_slot(b["user_id"], b["device_id"], datetime.fromisoformat(b["occurred_at"])).id for b in bodies}
         # 모든 이벤트가 하나의 구간에, 그리고 스크립트가 예상한 구간 ID에 들어가야 합니다.
         assert slots == {video_demo.window_id(start)}
         seen_windows.append(slots.pop())
@@ -83,43 +83,43 @@ def test_four_scenarios_use_four_distinct_five_minute_windows():
 def test_max_prompt_only_not_sum_or_mean_and_all_scores_disclosed(tmp_path):
     repo, net = repository(tmp_path), Network()
     first = ingest(repo, capture("p1", "5", "a"), Data(), net)
-    ingest(repo, capture("p2", "40", "b"), Data(), net)
-    ingest(repo, capture("p3", "20", "c"), Data(), net)
-    group = repo.get("company_assessment", first["company_window_id"])
+    ingest(repo, capture("p2", "40", "a"), Data(), net)
+    ingest(repo, capture("p3", "20", "a"), Data(), net)
+    group = repo.get("risk_window", first["risk_window_id"])
     assert group["prompt_max_score"] == 40           # 합계 65, 평균 21.67이 아님
-    assert group["prompt_source_capture_id"] == "p2" and group["prompt_source_user_id"] == "b"
+    assert group["prompt_source_capture_id"] == "p2" and group["prompt_source_user_id"] == "a"
     assert group["score"] == 40 + 68 * 0.4 == 67.2 and group["final_grade"] == "warning"
     assert group["capture_count"] == 3 and group["prompt_complete_count"] == 3
     assert group["prompt_scores"] == [
         {"capture_id": "p1", "user_id": "a", "score": 5.0, "status": "complete"},
-        {"capture_id": "p2", "user_id": "b", "score": 40.0, "status": "complete"},
-        {"capture_id": "p3", "user_id": "c", "score": 20.0, "status": "complete"},
+        {"capture_id": "p2", "user_id": "a", "score": 40.0, "status": "complete"},
+        {"capture_id": "p3", "user_id": "a", "score": 20.0, "status": "complete"},
     ]
 
 
 def test_missing_and_error_prompts_are_not_zero(tmp_path):
     repo, net = repository(tmp_path), Network()
     event = ingest(repo, capture("ok", "10"), Data(), net)
-    ingest(repo, capture("missing", None, "b"), Data(), net)
-    ingest(repo, capture("failed", "error", "c"), Data(), net)
-    group = repo.get("company_assessment", event["company_window_id"])
+    ingest(repo, capture("missing", None), Data(), net)
+    ingest(repo, capture("failed", "error"), Data(), net)
+    group = repo.get("risk_window", event["risk_window_id"])
     assert group["score"] is None and group["final_grade"] is None and group["fusion_status"] == "error"
     assert (group["prompt_complete_count"], group["prompt_missing_count"], group["prompt_error_count"]) == (1, 1, 1)
     by_id = {p["capture_id"]: p for p in group["prompt_scores"]}
-    assert by_id["missing"] == {"capture_id": "missing", "user_id": "b", "score": None, "status": "pending"}
-    assert by_id["failed"] == {"capture_id": "failed", "user_id": "c", "score": None, "status": "error"}
+    assert by_id["missing"] == {"capture_id": "missing", "user_id": "a", "score": None, "status": "pending"}
+    assert by_id["failed"] == {"capture_id": "failed", "user_id": "a", "score": None, "status": "error"}
 
 
 def test_network_breakdown_is_copied_from_result_not_invented(tmp_path):
     repo = repository(tmp_path)
     event = ingest(repo, capture("n1", "0"), Data(), Network())
-    group = repo.get("company_assessment", event["company_window_id"])
+    group = repo.get("risk_window", event["risk_window_id"])
     assert group["network_score_breakdown"] == BREAKDOWN.model_dump(mode="json")
     assert group["network_score_breakdown"]["total_score"] == group["network_score"] == 68
     assert group["network_score_breakdown"]["repeat_score"] is None
     # 근거가 없는 엔진 결과(이전 버전)는 None으로 두고 만들어 내지 않습니다.
     other = ingest(repo, capture("n2", "0", at="2026-10-01T10:31:00+09:00"), Data(), Network(breakdown=None))
-    assert repo.get("company_assessment", other["company_window_id"])["network_score_breakdown"] is None
+    assert repo.get("risk_window", other["risk_window_id"])["network_score_breakdown"] is None
 
 
 def test_dashboard_exposes_prompt_scores_breakdown_and_scope_note(tmp_path):
@@ -127,14 +127,14 @@ def test_dashboard_exposes_prompt_scores_breakdown_and_scope_note(tmp_path):
         body = video_demo.build_bodies(dict(name="t", events=[video_demo.req(
             10, "30", sent=100, received=100, packets_sent=1, packets_received=1)]),
             video_demo.slot_start(date(2026, 10, 1), 0))[0]
-        wid = client.post("/api/v1/ingest/events", json=body).json()["company_window_id"]
-        raw = client.get(f"/api/v1/company-windows/{wid}").json()
+        wid = client.post("/api/v1/ingest/events", json=body).json()["risk_window_id"]
+        raw = client.get(f"/api/v1/risk-windows/{wid}").json()
         assert raw["prompt_scores"][0]["score"] == 30 and raw["network_score_breakdown"]["base_score"] == 50
-        row = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
+        row = client.get("/api/v1/dashboard/risk-windows").json()["events"][0]
         assert row["prompt_complete_count"] == 1 and row["prompt_scores"] == raw["prompt_scores"]
         assert row["network_score_breakdown"] == raw["network_score_breakdown"]
         text = client.get(f"/api/v1/dashboard/explanation?window_id={wid}").json()["text"]
-        assert "한 회사의 5분 구간 전체 위험도" in text and "최고 점수 한 건만" in text
+        assert "한 사용자·한 단말의 5분 구간 위험도" in text and "최고 점수 한 건만" in text
         assert "기본점수 50 + 모델 확률 점수 18 + 재시도 가산점 0" in text
 
 
@@ -171,3 +171,14 @@ def test_verdict_and_summary_never_treat_null_as_success(capsys):
     assert video_demo.summarize([ok]) == 0
     pending = dict(ok, actual=None, state="mismatch", score=None)
     assert video_demo.summarize([ok, pending]) == 1
+
+
+def test_colleague_option_creates_separate_user_windows(tmp_path, capsys):
+    with TestClient(create_app(tmp_path / "c.db", data_engine=Data(), network_engine=Network(score=0, breakdown=None))) as client:
+        video_demo.main(["--date", "2026-10-01", "--timeout", "0", "--with-colleague"], api=ClientApi(client))
+        out = capsys.readouterr().out
+        windows = client.get("/api/v1/risk-windows?limit=50").json()
+        assert len(windows) == 8 and {w["user_id"] for w in windows} == {"demo-user", "colleague-user"}
+        demo = [w for w in windows if w["user_id"] == "demo-user"]
+        assert sorted(w["capture_count"] for w in demo) == sorted(len(s["events"]) for s in video_demo.SCENARIOS)
+        assert "사용자 2명" in out and "회사 점수 아님" in out

@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem,
-  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE } from './events.js';
+  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE, sameSlotSummary } from './events.js';
 
 test('company windows show scope, provisional phase and maximum prompt provenance', () => {
   const row = normalizeEvent({ id: 'company-20261004T010000Z', scope: 'company', phase: 'open',
     capture_count: 3, user: 'not-a-personal-grade', prompt_max_score: 50, network_score: 70,
     prompt_source_capture_id: 'b', prompt_source_user_id: 'employee-b', score: 78, grade: 'danger',
     started_at: '2026-10-04T01:00:00Z', ended_at: '2026-10-04T01:05:00Z' });
-  assert.equal(row.user, '회사 전체');
+  assert.equal(row.user, '회사 전체(이전 버전)');
   assert.equal(row.dept, '5분 구간 · 3건');
   assert.equal(row.phase, 'open');
   assert.equal(row.prompt_source_capture_id, 'b');
@@ -78,7 +78,7 @@ test('captured duration uses both recorded timestamps', () => {
 
 test('API uses bounded recent page and keeps total, errors never fall back to mock', async () => {
   const page = await fetchEventPage('', undefined, async (url) => {
-    assert.equal(url, '/api/v1/dashboard/company-windows?limit=200');
+    assert.equal(url, '/api/v1/dashboard/risk-windows?limit=200');
     return { ok: true, json: async () => ({ events: [{ id: 'real' }], total: 300 }) };
   });
   assert.equal(page.events[0].id, 'real');
@@ -143,9 +143,9 @@ test('pagination reads 200-row pages by offset, merges, de-duplicates and caps p
     return { ok: true, json: async () => ({ events: rows[key] ?? [], total: 450 }) };
   }, 3);
   assert.deepEqual(urls, [
-    'http://x/api/v1/dashboard/company-windows?limit=200',
-    'http://x/api/v1/dashboard/company-windows?limit=200&offset=200',
-    'http://x/api/v1/dashboard/company-windows?limit=200&offset=400',
+    'http://x/api/v1/dashboard/risk-windows?limit=200',
+    'http://x/api/v1/dashboard/risk-windows?limit=200&offset=200',
+    'http://x/api/v1/dashboard/risk-windows?limit=200&offset=400',
   ]);
   assert.deepEqual(page.events.map((e) => e.id), ['1', '2', '3', '4']);
   assert.equal(page.total, 450);
@@ -192,7 +192,7 @@ test('prompt score rows disclose every prompt and keep missing/error as null, no
   assert.equal(rows[3].status, 'error');
   assert.deepEqual(promptScoreRows({}), []);
   assert.match(PROMPT_MAX_NOTE, /최고 점수 한 건만/);
-  assert.match(SCOPE_NOTE[0], /한 회사의 5분 구간 전체 위험도/);
+  assert.match(SCOPE_NOTE[0], /한 사용자·한 단말의 5분 구간 위험도/);
 });
 
 test('network breakdown uses server values only and marks missing parts as not provided', () => {
@@ -203,4 +203,22 @@ test('network breakdown uses server values only and marks missing parts as not p
   assert.equal(networkBreakdownParts(b).parts.find((p) => p.key === 'repeat_score').value, null);
   assert.equal(networkBreakdownParts(null), null);
   assert.equal(networkBreakdownText(undefined), '네트워크 점수 구성 정보 없음');
+});
+
+test('user-device windows keep user identity and same-slot summary counts grades without summing', () => {
+  const base = { scope: 'user_device', window_start: '2026-10-01T01:00:00Z', started_at: '2026-10-01T01:00:00Z' };
+  const rows = [
+    normalizeEvent({ ...base, id: 'w-a', user: 'alice', device_id: 'pc', grade: 'danger', score: 88, capture_count: 5 }),
+    normalizeEvent({ ...base, id: 'w-b', user: 'bob', device_id: 'pc', grade: 'normal', score: 0 }),
+    normalizeEvent({ ...base, id: 'w-c', user: 'carol', device_id: 'pc', grade: null, score: null }),
+    normalizeEvent({ ...base, id: 'w-x', user: 'dave', device_id: 'pc', grade: 'danger', score: 99, window_start: '2026-10-01T01:05:00Z' }),
+  ];
+  assert.equal(rows[0].user, 'alice');
+  assert.equal(rows[0].dept, 'pc · 5분 · 5건');
+  const summary = sameSlotSummary(rows, rows[1]);
+  assert.deepEqual(summary.windows.map((w) => w.id), ['w-a', 'w-b', 'w-c']); // 다른 시간대(w-x) 제외, 높은 등급 먼저
+  assert.deepEqual(summary.counts, { normal: 1, caution: 0, warning: 0, danger: 1 });
+  assert.equal(summary.pending, 1); // 미판정은 정상으로 세지 않음
+  assert.equal(summary.userCount, 3);
+  assert.equal(sameSlotSummary(rows, { windowStart: null }), null);
 });

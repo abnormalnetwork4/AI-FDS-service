@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from . import services, dashboard
 from .collection import analyze_safely, ingest
-from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest, CompanyAssessment
+from .contracts import Assessment, CaptureIngest, CaptureRecord, EventIngest, CompanyAssessment, RiskWindow
 from .live import changes
 from .repository import Repository
 from .schemas import AIUsageEvent, BehaviorWindow, DashboardSummary, DataRiskRequest, NetworkSession, RiskResult, WindowRequest
@@ -101,10 +101,10 @@ def dashboard_events(repo: Repo, user_id: str | None = None, limit: Limit = 50, 
 @router.get("/dashboard/explanation", response_model=dashboard.Explanation, tags=["대시보드"])
 def dashboard_explanation(repo: Repo, capture_id: str | None = None, window_id: str | None = None):
     if window_id is not None:
-        raw = repo.get("company_assessment", window_id)
+        raw = repo.get("risk_window", window_id) or repo.get("company_assessment", window_id)
         if raw is None:
-            raise HTTPException(404, "Company window not found")
-        return dashboard.explain_company(raw)
+            raise HTTPException(404, "Risk window not found")
+        return dashboard.explain_window(raw)
     if capture_id is None:
         raise HTTPException(422, "Provide window_id or capture_id")
     # 브라우저가 만든 근거가 아니라 저장된 분석 결과만 요약합니다.
@@ -114,18 +114,40 @@ def dashboard_explanation(repo: Repo, capture_id: str | None = None, window_id: 
     return dashboard.explain(raw)
 
 
-@router.get("/dashboard/company-windows", response_model=dashboard.DashboardPage, tags=["대시보드"])
-def company_dashboard(repo: Repo, limit: Limit = 50, offset: Offset = 0):
-    rows, total = repo.company_page(limit, offset)
-    return dashboard.DashboardPage(events=[dashboard.present_company(row) for row in rows], total=total, limit=limit, offset=offset)
+@router.get("/dashboard/risk-windows", response_model=dashboard.DashboardPage, tags=["대시보드"])
+def risk_window_dashboard(repo: Repo, limit: Limit = 50, offset: Offset = 0, user_id: str | None = None,
+                          start: str | None = None):
+    # start는 구간 시작 시각(UTC ISO 문자열, 응답의 window_start)입니다. 같은 시간대의 다른 사용자 구간 조회에 씁니다.
+    rows, total = repo.window_page(limit, offset, user_id, start)
+    return dashboard.DashboardPage(events=[dashboard.present_window(row) for row in rows], total=total, limit=limit, offset=offset)
 
 
-@router.get("/company-windows", response_model=list[CompanyAssessment], tags=["회사 5분 통합"])
+@router.get("/dashboard/company-slots", response_model=dashboard.CompanySlotPage, tags=["대시보드"])
+def company_slots(repo: Repo, limit: Limit = 50, offset: Offset = 0):
+    slots, total = repo.company_slots(limit, offset)
+    return dashboard.CompanySlotPage(slots=slots, total=total, limit=limit, offset=offset)
+
+
+@router.get("/risk-windows", response_model=list[RiskWindow], tags=["사용자 5분 통합"])
+def risk_windows(repo: Repo, limit: Limit = 50, offset: Offset = 0, user_id: str | None = None):
+    return repo.window_page(limit, offset, user_id)[0]
+
+
+@router.get("/risk-windows/{window_id}", response_model=RiskWindow, tags=["사용자 5분 통합"])
+def risk_window(window_id: str, repo: Repo):
+    raw = repo.get("risk_window", window_id)
+    if raw is None:
+        raise HTTPException(404, "Risk window not found")
+    return raw
+
+
+@router.get("/company-windows", response_model=list[CompanyAssessment], tags=["이전 버전"], deprecated=True)
 def company_windows(repo: Repo, limit: Limit = 50, offset: Offset = 0):
-    return repo.company_page(limit, offset)[0]
+    # v0.6~0.7의 회사 전체 합산 구간. 새로 만들지 않으며 보존된 기록 조회용입니다.
+    return repo.legacy_company_page(limit, offset)[0]
 
 
-@router.get("/company-windows/{window_id}", response_model=CompanyAssessment, tags=["회사 5분 통합"])
+@router.get("/company-windows/{window_id}", response_model=CompanyAssessment, tags=["이전 버전"], deprecated=True)
 def company_window(window_id: str, repo: Repo):
     raw = repo.get("company_assessment", window_id)
     if raw is None:

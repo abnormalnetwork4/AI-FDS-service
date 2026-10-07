@@ -1,4 +1,4 @@
-import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -149,7 +149,7 @@ function seedMockHistory() {
 // 요약도 내부 FDS API에서 저장된 결과로 만듭니다. 외부 LLM으로 데이터를 보내지 않습니다.
 async function explainEvent(event) {
   if (USE_MOCK) return { text: buildFallbackSummary(event), source: "demo" };
-  const key = event.scope === "company" ? "window_id" : "capture_id";
+  const key = event.scope === "company" || event.scope === "user_device" ? "window_id" : "capture_id";
   const res = await fetch(`${API_BASE}/api/v1/dashboard/explanation?${key}=${encodeURIComponent(event.id)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -658,7 +658,7 @@ function SkeletonDetail() {
 
 /* ───────────────────────── 메인 ───────────────────────── */
 
-// 회사 구간의 프롬프트 점수 목록과 네트워크 점수 구성. 서버 값만 표시하고 없는 값은 미제공/미판정으로 둡니다.
+// 5분 구간의 프롬프트 점수 목록과 네트워크 점수 구성. 서버 값만 표시하고 없는 값은 미제공/미판정으로 둡니다.
 function CompanyBreakdown({ event }) {
   const rows = promptScoreRows(event);
   const network = networkBreakdownParts(event.network_score_breakdown);
@@ -706,6 +706,40 @@ function CompanyBreakdown({ event }) {
             </p>
           </>
         ) : <p className="company-breakdown__note">네트워크 점수 구성 정보가 없습니다(분석 대기 또는 이전 버전 결과).</p>}
+      </section>
+    </div>
+  );
+}
+
+// 같은 5분 시간대의 다른 사용자 구간. 클릭하면 그 구간 상세로 이동합니다. 회사 점수를 따로 계산하지 않습니다.
+function SameSlotPanel({ summary, selectedId, onSelect }) {
+  if (!summary) return null;
+  const { windows, counts, pending, error, userCount } = summary;
+  return (
+    <div className="company-breakdown company-breakdown--single">
+      <section className="company-breakdown__col">
+        <h4>같은 시간대 사용자 구간 · {userCount}명</h4>
+        <p className="company-breakdown__counts">
+          {["danger", "warning", "caution", "normal"].map((g) => `${LEVELS[g].label} ${counts[g]}`).join(" · ")}
+          {` · 미판정 ${pending}`}{error ? ` · 오류 ${error}` : ""}
+        </p>
+        <div className="company-breakdown__table">
+          <table>
+            <thead><tr><th>사용자 · 단말</th><th>등급</th><th>통합 점수</th><th>프롬프트 최고</th></tr></thead>
+            <tbody>
+              {windows.map((w) => (
+                <tr key={w.id} className={w.id === selectedId ? "is-max" : "is-link"} onClick={() => onSelect(w.id)}
+                  title="클릭하면 이 사용자 구간을 엽니다">
+                  <td>{w.user} · {w.device_id}{w.id === selectedId && <b> · 현재</b>}</td>
+                  <td style={{ color: LEVELS[eventLevel(w)].color }}>{LEVELS[eventLevel(w)].label}</td>
+                  <td>{formatScore(w.score)}</td>
+                  <td>{w.prompt_max_score == null ? "—" : `${formatScore(w.prompt_max_score)}/60`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="company-breakdown__note">화면에 불러온 구간 기준입니다. 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.</p>
       </section>
     </div>
   );
@@ -1097,6 +1131,9 @@ export default function RiskDashboard() {
         .company-breakdown td { white-space: nowrap; }
         .company-breakdown td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
         .company-breakdown tr.is-max td { background: var(--accent-soft); }
+        .company-breakdown tr.is-link { cursor: pointer; }
+        .company-breakdown tr.is-link:hover td { background: var(--tint); }
+        .company-breakdown--single { grid-template-columns: 1fr; }
         .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
         .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
         .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
@@ -1165,7 +1202,7 @@ export default function RiskDashboard() {
             <Radio size={17} color="#33429A" />
           </div>
           <div>
-            회사 전체 · 5분 구간 위험도
+            사용자·단말별 5분 구간 위험도
             <div className="dash-header__sub">
               <span className={`live-dot ${dotClass}`} />
               {statusText} · 최근 {events.length} / 전체 {total}건
@@ -1218,7 +1255,7 @@ export default function RiskDashboard() {
             <div className="search-box">
               <Search size={14} color="#8B8F99" />
               <input
-                placeholder="5분 구간 ID 검색"
+                placeholder="사용자·단말·구간 ID 검색"
                 aria-label="구간 검색"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -1325,7 +1362,7 @@ export default function RiskDashboard() {
                 <User size={14} /> <b>{selected.user}</b> · {selected.dept}
               </span>
               <span className="detail-meta__item">
-                <Network size={14} /> {selected.scope === "company" ? "구간 ID" : "세션 ID"} <b>{selected.sessionId ?? selected.id}</b>
+                <Network size={14} /> {selected.scope === "company" || selected.scope === "user_device" ? "구간 ID" : "세션 ID"} <b>{selected.sessionId ?? selected.id}</b>
               </span>
               <span className="detail-meta__item">
                 <Clock size={14} /> 관측 {selected.connectedAt}
@@ -1335,7 +1372,7 @@ export default function RiskDashboard() {
               </span>
             </div>
 
-            {selected.scope === "company" && (
+            {(selected.scope === "company" || selected.scope === "user_device") && (
               <div className="llm-box" role="note">
                 <b>{selected.phase === "open" ? "집계 중 · 잠정 점수" : "종료된 5분 구간"}</b>
                 <p>{selected.connectedAt} ~ {new Date(selected.endedAtMs).toLocaleTimeString("ko-KR", { hour12: false })} (끝 시각 제외)</p>
@@ -1347,7 +1384,10 @@ export default function RiskDashboard() {
               </div>
             )}
 
-            {selected.scope === "company" && <CompanyBreakdown event={selected} />}
+            {(selected.scope === "company" || selected.scope === "user_device") && <CompanyBreakdown event={selected} />}
+            {selected.scope === "user_device" && (
+              <SameSlotPanel summary={sameSlotSummary(events, selected)} selectedId={selected.id} onSelect={setSelectedId} />
+            )}
 
             <div className="detail-main">
               <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />
@@ -1381,7 +1421,7 @@ export default function RiskDashboard() {
 
             <div className="evidence-cols">
               <EvidenceGroup
-                title="회사 전체 네트워크 · 5분 집계 (N1~N6)"
+                title={selected.scope === "company" ? "회사 전체 네트워크 · 5분 집계 (N1~N6, 이전 버전)" : "이 사용자·단말 네트워크 · 5분 집계 (N1~N6)"}
                 icon={<Network size={15} color="#5F6372" />}
                 items={selected.network_reasons}
                 accent="#33429A"

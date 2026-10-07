@@ -254,5 +254,6 @@ class DashboardSummary(Model):
     scored_analysis_count: int
     graded_event_count: int = 0
     company_window_count: int = 0
+    risk_window_count: int = 0  # 사용자·단말 5분 구간 수. graded_window_count도 이 구간 기준입니다.
     graded_window_count: int = 0
     average_risk_score: Score | None

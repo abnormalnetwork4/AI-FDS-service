@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .contracts import Assessment, CompanyAssessment, PromptScore
+from .contracts import Assessment, CompanyAssessment, PromptScore, RiskWindow
 from .schemas import NetworkScoreBreakdown
 from .schemas import Finding, NetworkSession
 
@@ -42,7 +42,8 @@ class DashboardEvent(BaseModel):
     fusion_status: Literal["pending", "complete", "error"] = "pending"
     network_reasons: list[Evidence]
     prompt_reasons: list[Evidence]
-    scope: Literal["event", "company"] = "event"
+    scope: Literal["event", "user_device", "company"] = "event"
+    window_start: str | None = None  # 같은 시간대 다른 사용자 구간을 묶어 보기 위한 UTC 시작 시각
     phase: Literal["open", "closed"] | None = None
     capture_count: int = 0
     prompt_max_score: float | None = None
@@ -58,9 +59,10 @@ class DashboardEvent(BaseModel):
 
 
 # 화면·요약에 같은 문구를 쓰기 위한 설명입니다. 점수 정책을 바꾸지 않습니다.
-SCOPE_NOTE = ("이 결과는 한 명의 개인 위험도가 아니라, 한 회사의 5분 구간 전체 위험도입니다. "
-              "현재 시연은 한 명의 가상 사용자로 구성되어 있습니다. "
-              "실제 모델 학습 데이터가 여러 사용자의 5분 집계라면, 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.")
+SCOPE_NOTE = ("이 결과는 한 사용자·한 단말의 5분 구간 위험도이며, 보안 담당자의 검토 우선순위용 지표입니다(위반 확정 아님). "
+              "네트워크 모델의 학습 단위(사용자별 5분 창)와 같은 기준으로 판정합니다. "
+              "회사 화면은 같은 시간대의 사용자 구간을 요약할 뿐 별도의 회사 점수를 만들지 않습니다. "
+              "현재 시연은 가상 사용자로 구성되어 있으므로, 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.")
 PROMPT_MAX_NOTE = ("프롬프트는 구간 안 최고 점수 한 건만 통합 점수에 반영합니다. 합산하면 요청 수가 많을수록 점수가 부풀고, "
                    "평균하면 위험 프롬프트 한 건이 정상 요청에 묻히기 때문입니다. 요청량·전송량은 네트워크 점수가 따로 반영합니다.")
 
@@ -129,7 +131,8 @@ def explain(raw):
                if assessment.final_grade is not None and assessment.score is not None
                else "통합 등급은 미판정이며 안전 판정을 뜻하지 않습니다.")
     if assessment.scoring_scope == "prompt_only":
-        verdict = f"개인 통합 등급은 미판정(산정 대상 아님). 회사 구간 {assessment.company_window_id}에서 통합 결과를 조회합니다."
+        window = assessment.risk_window_id or assessment.company_window_id
+        verdict = f"개별 관측의 통합 등급은 미판정(산정 대상 아님). 사용자·단말 5분 구간 {window}에서 통합 결과를 조회합니다."
     lines = [f"캡처 {assessment.id}: 처리 {'중' if assessment.processing_state == 'processing' else '종료'}. {verdict}"]
     lines.extend(assessment.override_reasons)
     for result in assessment.results:
@@ -145,8 +148,10 @@ def explain(raw):
     return Explanation(text="\n".join(lines))
 
 
-def present_company(raw):
-    group = CompanyAssessment.model_validate(raw)
+def present_window(raw):
+    """사용자·단말 구간(RiskWindow) 또는 이전 버전 회사 구간(CompanyAssessment)을 화면 형식으로 바꿉니다."""
+    legacy = raw.get("scope") == "company"
+    group = CompanyAssessment.model_validate(raw) if legacy else RiskWindow.model_validate(raw)
     evidence = {"data": [], "network": []}
     for result in group.results:
         for index, finding in enumerate(result.findings):
@@ -156,9 +161,14 @@ def present_company(raw):
                 detected=finding.detected, probability=finding.probability, threshold=finding.threshold,
                 detection_method=finding.detection_method, window_minutes=5))
     return DashboardEvent(
-        id=group.id, session_id=group.id, user="회사 전체", device_id="전체 단말", destination="전체 AI 사용 기록",
-        started_at=group.start.isoformat(), ended_at=group.end.isoformat(), scope="company", phase=group.phase,
-        status=group.status, fusion_status=group.fusion_status, observation_kind="company_window",
+        id=group.id, session_id=group.id,
+        user="회사 전체(이전 버전)" if legacy else group.user_id,
+        device_id="전체 단말" if legacy else group.device_id,
+        destination="전체 AI 사용 기록" if legacy else "사용자·단말 AI 사용 기록",
+        started_at=group.start.isoformat(), ended_at=group.end.isoformat(), window_start=raw["start"],
+        scope="company" if legacy else "user_device", phase=group.phase,
+        status=group.status, fusion_status=group.fusion_status,
+        observation_kind="company_window" if legacy else "risk_window",
         processing_state="processing" if group.network_revision != group.revision else "finished",
         reason=group.reason, grade=group.final_grade, score=group.score,
         override=group.override, override_reasons=group.override_reasons,
@@ -171,14 +181,44 @@ def present_company(raw):
         network_reasons=evidence["network"], prompt_reasons=evidence["data"])
 
 
-def explain_company(raw):
-    group = CompanyAssessment.model_validate(raw)
+class CompanySlot(BaseModel):
+    """회사 화면의 5분 시간대 요약. 점수를 새로 계산하지 않고 사용자 구간 결과를 셉니다."""
+    start: str
+    end: str
+    phase: Literal["open", "closed"]
+    window_count: int
+    user_count: int
+    graded_window_count: int
+    pending_window_count: int
+    error_window_count: int
+    grade_counts: dict[str, int]
+    top_window_id: str | None = None
+    top_user_id: str | None = None
+    top_device_id: str | None = None
+    top_grade: Literal["normal", "caution", "warning", "danger"] | None = None
+    top_score: float | None = None
+    window_ids: list[str] = Field(default_factory=list)
+
+
+class CompanySlotPage(BaseModel):
+    slots: list[CompanySlot]
+    total: int
+    limit: int
+    offset: int
+    note: str = ("시간대별로 사용자·단말 구간의 등급을 셉니다. '최고 등급 구간'은 가장 높은 등급(같으면 높은 점수)의 "
+                 "사용자 구간이며, 회사 점수를 따로 합산하거나 평균하지 않습니다. 미판정 구간은 정상으로 세지 않습니다.")
+
+
+def explain_window(raw):
+    legacy = raw.get("scope") == "company"
+    group = CompanyAssessment.model_validate(raw) if legacy else RiskWindow.model_validate(raw)
     phase = "진행 중인 구간의 잠정 결과" if group.phase == "open" else "종료된 구간의 결과(지연 수신 시 갱신)"
-    lines = [f"회사 전체 {group.start.isoformat()} ~ {group.end.isoformat()} (끝 시각 제외). {phase}.", group.reason]
+    target = "회사 전체(이전 버전 합산 구간)" if legacy else f"사용자 {group.user_id} · 단말 {group.device_id}"
+    lines = [f"{target} {group.start.isoformat()} ~ {group.end.isoformat()} (끝 시각 제외). {phase}.", group.reason]
     if group.score is not None:
         lines.append(f"프롬프트 최고 {group.prompt_max_score:g}/60 + 네트워크 {group.network_score:g} × 0.4 = {group.score:g}/100점. 등급: {group.final_grade}.")
     if group.prompt_source_capture_id:
-        lines.append(f"최고 점수 근거 캡처: {group.prompt_source_capture_id}, 사용자: {group.prompt_source_user_id}. 개인의 통합 위험 등급을 뜻하지 않습니다.")
+        lines.append(f"최고 점수 근거 캡처: {group.prompt_source_capture_id}, 사용자: {group.prompt_source_user_id}.")
     lines.append(f"프롬프트 분석 {group.capture_count}건 중 완료 {group.prompt_complete_count}, "
                  f"미판정 {group.prompt_missing_count}, 오류 {group.prompt_error_count}. {PROMPT_MAX_NOTE}")
     if group.prompt_scores:

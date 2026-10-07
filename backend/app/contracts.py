@@ -105,6 +105,9 @@ class Assessment(Model):
     user_id: Identifier
     session_id: Identifier
     scoring_scope: Literal["legacy_event", "prompt_only"] = "legacy_event"
+    # 이 관측이 속한 사용자·단말 5분 위험 구간 ID입니다.
+    risk_window_id: str | None = None
+    # 이전 버전(회사 전체 합산) 구간 ID. 기존 기록 보존용이며 새 수집에서는 채우지 않습니다.
     company_window_id: str | None = None
     processing_state: Literal["processing", "finished"] = "processing"
     status: Literal["pending", "complete", "error"] = "pending"
@@ -125,7 +128,7 @@ class Assessment(Model):
 
 
 class PromptScore(Model):
-    """회사 구간에 속한 개별 프롬프트 결과 한 건. 최고 점수 선택 근거를 숨기지 않기 위해 모두 공개합니다."""
+    """5분 구간에 속한 개별 프롬프트 결과 한 건. 최고 점수 선택 근거를 숨기지 않기 위해 모두 공개합니다."""
     capture_id: str
     user_id: str
     # complete일 때만 점수가 있습니다. pending(누락·미분석)·error는 0점이 아니라 None입니다.
@@ -133,11 +136,9 @@ class PromptScore(Model):
     status: Literal["pending", "complete", "error"]
 
 
-class CompanyAssessment(Model):
-    """한 배포 = 한 회사. 사용자별 등급이 아닌 고정 5분 구간의 전체 위험도."""
+class WindowResult(Model):
+    """고정 5분 구간 결과의 공통 필드. 통합 점수 = 구간 프롬프트 최고 점수 + 네트워크 점수 × 0.4."""
     id: str
-    user_id: Identifier = "company"
-    scope: Literal["company"] = "company"
     start: AwareDatetime
     end: AwareDatetime
     duration_minutes: Literal[5] = 5
@@ -164,6 +165,23 @@ class CompanyAssessment(Model):
     confidence: None = None
     override: bool = False
     override_reasons: list[str] = Field(default_factory=list)
-    scoring_policy: str = "company5m-promptmax60-network40-v2"
     reason: str = "5분 구간 분석 대기"
     results: list[RiskResult] = Field(default_factory=list)
+
+
+class RiskWindow(WindowResult):
+    """한 사용자·한 단말의 고정 5분 구간 위험도. 네트워크 모델 학습 단위(사용자별 5분 창)와 같습니다.
+
+    점수는 보안 담당자의 검토 우선순위용이며 위반을 확정하지 않습니다.
+    """
+    user_id: Identifier
+    device_id: Identifier
+    scope: Literal["user_device"] = "user_device"
+    scoring_policy: str = "userdevice5m-promptmax60-network40-v3"
+
+
+class CompanyAssessment(WindowResult):
+    """이전 버전(v0.6~0.7)의 회사 전체 합산 구간. 기존 기록 조회용이며 새로 만들거나 갱신하지 않습니다."""
+    user_id: Identifier = "company"
+    scope: Literal["company"] = "company"
+    scoring_policy: str = "company5m-promptmax60-network40-v2"

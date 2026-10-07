@@ -120,7 +120,7 @@ def test_ingested_events_are_scored_end_to_end(tmp_path, engine):
             response = client.post("/api/v1/ingest/events", json=body)
             assert response.status_code == 200
             assert client.post("/api/v1/ingest/events", json=body).json() == response.json()  # 재전송
-        group = client.get("/api/v1/company-windows/" + response.json()["company_window_id"]).json()
+        group = client.get("/api/v1/risk-windows/" + response.json()["risk_window_id"]).json()
         results = {r["window_id"]: r for r in group["results"] if r["engine"] == "network"}
         windows = {wid: client.app.state.repository.get("window", wid) for wid in results}
         by_minutes = {w["duration_minutes"]: results[wid] for wid, w in windows.items()}
@@ -131,7 +131,7 @@ def test_ingested_events_are_scored_end_to_end(tmp_path, engine):
         metadata_only = client.post("/api/v1/ingest/events", json=dict(
             id="meta-1", session_id="m", user_id="u2", device_id="pc2", destination="x.ai",
             occurred_at=(base + timedelta(minutes=5)).isoformat(), source="collector", bytes_sent=10)).json()
-        metadata_group = client.get("/api/v1/company-windows/" + metadata_only["company_window_id"]).json()
+        metadata_group = client.get("/api/v1/risk-windows/" + metadata_only["risk_window_id"]).json()
         assert {r["status"] for r in metadata_group["results"] if r["engine"] == "network"} == {"pending"}
         assert client.post("/api/v1/ingest/events", json=dict(
             id="bad", session_id="m", user_id="u2", device_id="pc2", destination="x.ai",

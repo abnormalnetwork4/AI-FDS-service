@@ -31,8 +31,8 @@ def test_events_need_no_session_end_and_aggregate_deltas_once(tmp_path):
         second["occurred_at"] = "2026-10-04T10:00:01+09:00"
         second["bytes_sent"] = 50
         result = client.post("/api/v1/ingest/events", json=second).json()
-        company = client.get("/api/v1/company-windows/" + result["company_window_id"]).json()
-        for risk in [r for r in company["results"] if r["engine"] == "network"]:
+        window = client.get("/api/v1/risk-windows/" + result["risk_window_id"]).json()
+        for risk in [r for r in window["results"] if r["engine"] == "network"]:
             window = client.app.state.repository.get("window", risk["window_id"])
             assert window["features"]["session_count"] == 1
             assert window["features"]["request_count"] == 2
@@ -75,8 +75,8 @@ def test_fast_data_result_visible_before_slow_network_finishes(tmp_path):
                 screen = client.get("/api/v1/dashboard/events").json()["events"][0]
                 assert len(screen["prompt_reasons"]) == 4
                 assert screen["network_reasons"] == []
-                company = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
-                assert company["processing_state"] == "processing" and company["score"] is None
+                window = client.get("/api/v1/dashboard/risk-windows").json()["events"][0]
+                assert window["processing_state"] == "processing" and window["score"] is None
             finally:
                 release.set()
             assert job.result().json()["processing_state"] == "finished"

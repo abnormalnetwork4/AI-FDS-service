@@ -119,9 +119,9 @@ def test_new_default_with_real_network_end_to_end(tmp_path, monkeypatch):
         assert response.status_code == 200
         results = response.json()["results"]
         assert next(r for r in results if r["engine"] == "data")["status"] == "complete"
-        group = client.get("/api/v1/company-windows/" + response.json()["company_window_id"]).json()
+        group = client.get("/api/v1/risk-windows/" + response.json()["risk_window_id"]).json()
         assert any(r["status"] == "complete" and r["score"] is not None for r in group["results"] if r["engine"] == "network")
-        row = client.get("/api/v1/dashboard/company-windows").json()["events"][0]
+        row = client.get("/api/v1/dashboard/risk-windows").json()["events"][0]
         assert all(f["threshold"] == .45 for f in row["prompt_reasons"])
         assert any(f["status"] == "complete" for f in row["network_reasons"])
         assert row["score"] is not None and row["confidence"] is None
