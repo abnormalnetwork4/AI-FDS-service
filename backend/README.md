@@ -82,6 +82,31 @@ Network 모델 입력용 선택 항목: `packets_sent`, `packets_received`(증�
 .\.venv\Scripts\python.exe examples/event_demo.py
 ```
 
+### 시연 영상용 등급별 시나리오 (`examples/video_demo.py`)
+
+가상 사용자 `demo-user`·단말 `demo-pc`의 관측 기록만 `POST /api/v1/ingest/events`로 보냅니다. 실제 AI 요청·네트워크 전송은 하지 않으며 점수·등급을 보내지 않습니다. 시나리오마다 다른 고정 5분 구간(KST 10:00·10:05·10:10·10:15)을 쓰고, 전송 후 `GET /api/v1/company-windows/{id}`의 실제 결과를 출력합니다.
+
+| 시나리오(목표) | 입력 의도 |
+|---|---|
+| normal | 업무 요약 3건, 요청당 3~4KB, 파일·재시도 없음 |
+| caution | 브라우저·스크립트가 번갈아 15초 간격 6건, 반복 출력 요구 프롬프트 1건, 작은 전송량 |
+| warning | 자동화 스크립트 2개가 12초 간격 22건(응답 겹침), 요청당 9KB, 응답 수집 의도 프롬프트 |
+| danger | 복합 위험 프롬프트, 요청당 0.6~0.9MB·파일 6~8개, 테넌트·미승인 목적지 전환, 차단 후 재시도 |
+
+```powershell
+# 창 1
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+# 창 2 (같은 날짜를 다시 쓰면 기존 구간과 섞이므로 중단됩니다. --date로 다른 날짜, 과거 날짜도 가능)
+.\.venv\Scripts\python.exe examples\video_demo.py
+.\.venv\Scripts\python.exe examples\video_demo.py --date 2026-10-01
+```
+
+출력: 시나리오, 전송 이벤트 수, `company_window_id`, 프롬프트 분석 건수, 프롬프트 최고 점수와 근거 capture/user ID, 네트워크 점수와 구성, 반영 점수, 통합 점수, 실제 네트워크 판정 유형, 목표 등급·실제 등급·판정.
+
+**시나리오 이름은 목표일 뿐 결과를 보장하지 않습니다.** 네트워크 모델은 24개 행동 피처의 조합으로 판정하므로 `bytes_sent`·`file_count`를 키워도 반드시 위험 유형이 되지 않고, 작은 입력이 위협으로 판정될 수도 있습니다. 회사 구간은 같은 DB의 최근 1시간 기록(모든 사용자)을 피처로 쓰므로 DB 상태에 따라서도 달라집니다(예: caution 입력을 조금 바꾸면 기존 이력 유무에 따라 normal·N3·N5가 갈렸습니다). 목표와 실제가 다르면 "목표와 실제 결과가 다름"을 표시하고 종료 코드 1을 반환합니다. 실제 등급이 미판정(null)이어도 성공으로 보지 않습니다. 스크립트는 값을 자동 조정하거나 등급을 덮어쓰지 않으므로, 필요하면 파일 위쪽 시나리오 입력값을 직접 고친 뒤 다른 날짜로 다시 실행합니다.
+
+현재 시연은 한 명의 가상 사용자로 구성됩니다. 결과는 개인 위험도가 아니라 회사 5분 구간 전체 위험도이며, 모델 학습 데이터가 여러 사용자의 5분 집계라면 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.
+
 ### 완료된 세션을 전송하는 기존 경로
 
 `POST /api/v1/ingest/captures`에 다음처럼 보냅니다. AI 사용 명령이 아니라 이미 관측한 통신 기록의 복사본입니다.
@@ -119,7 +144,7 @@ HTTPS 패킷 메타데이터만으로 프롬프트 원문이나 로그인 사용
 | GET | `/api/v1/captures` | 수집 기록·프롬프트 확보 상태 |
 | GET | `/api/v1/assessments` | 캡처별 분석 묶음 |
 | GET | `/api/v1/assessments/{capture_id}` | 개별 프롬프트 결과 + company_window_id |
-| GET | `/api/v1/company-windows/{window_id}` | 회사 전체 5분 통합 결과 |
+| GET | `/api/v1/company-windows/{window_id}` | 회사 전체 5분 통합 결과. `prompt_scores`(구간 안 모든 프롬프트 점수·상태)와 `network_score_breakdown`(네트워크 점수 구성) 포함 |
 | GET | `/api/v1/dashboard/company-windows` | 화면용 회사 5분 구간 목록 |
 | POST / GET | `/api/v1/network-sessions` | 세션 개별 등록/조회 |
 | POST / GET | `/api/v1/ai-usage-events` | AI 사용 이벤트 개별 등록/조회 |

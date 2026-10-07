@@ -195,6 +195,24 @@ class Finding(Model):
         return self
 
 
+class NetworkScoreBreakdown(Model):
+    """네트워크 모델 보고서(model/network/risk_scoring.build_report)의 score_breakdown을 그대로 옮긴 값입니다.
+
+    서버가 새로 계산하지 않습니다. 모델이 제공하지 않은 항목은 None입니다.
+    예: 반복 가산점은 REPEAT_KEY=None(비활성)이면 보고서에 없으므로 None입니다(0점으로 꾸미지 않음).
+    """
+    base_score: float
+    probability_score: float
+    retry_score: float
+    repeat_score: float | None = None
+    total_score: Score
+    threat: Literal["normal", "N1", "N2", "N3", "N4", "N5", "N6"]
+    threat_name: str
+    predicted_class: str | None = None
+    model_probability: Probability | None = None
+    retry_count: Count | None = None
+
+
 class RiskResult(Model):
     # 엔진 한 번의 실행 결과입니다. source_event_id는 원래 요청, window_id는 행동 집계와 연결하는 번호입니다.
     id: str = Field(default_factory=lambda: str(uuid4()))
@@ -209,6 +227,8 @@ class RiskResult(Model):
     scoring_policy: str | None = None
     input_origin: Literal["direct_user", "external_document", "tool_output"] | None = None
     findings: list[Finding]
+    # 네트워크 엔진만 채웁니다. 이전에 저장된 결과에는 없으며, 그 경우 추측해서 만들지 않습니다.
+    score_breakdown: NetworkScoreBreakdown | None = None
     created_at: AwareDatetime = Field(default_factory=now)
 
     @model_validator(mode="after")
@@ -220,6 +240,8 @@ class RiskResult(Model):
             raise ValueError("Risk score exceeds its declared scale")
         if self.status == "complete" and (not self.findings or any(f.status != "complete" for f in self.findings)):
             raise ValueError("Complete results require complete findings")
+        if self.score_breakdown is not None and (self.status != "complete" or self.score != self.score_breakdown.total_score):
+            raise ValueError("Score breakdown must belong to a complete result with the same total")
         return self
 
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem } from './events.js';
+import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem,
+  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE } from './events.js';
 
 test('company windows show scope, provisional phase and maximum prompt provenance', () => {
   const row = normalizeEvent({ id: 'company-20261004T010000Z', scope: 'company', phase: 'open',
@@ -177,4 +178,29 @@ test('notable items use server detections instead of probability or reason heuri
   assert.equal(viewStatus(row.prompt_reasons[1]), 'not_detected');
   assert.equal(isNotable(row.network_reasons[3]), false); // 미판정은 탐지가 아님
   assert.equal(isNotable(row.network_reasons[5]), false); // 오류는 별도 표시
+});
+
+test('prompt score rows disclose every prompt and keep missing/error as null, not zero', () => {
+  const rows = promptScoreRows({ prompt_source_capture_id: 'b', prompt_scores: [
+    { capture_id: 'a', user_id: 'u1', score: 5, status: 'complete' },
+    { capture_id: 'b', user_id: 'u2', score: 40, status: 'complete' },
+    { capture_id: 'c', user_id: 'u3', score: null, status: 'pending' },
+    { capture_id: 'd', user_id: 'u4', score: 0, status: 'error' },
+  ] });
+  assert.deepEqual(rows.map((r) => r.score), [5, 40, null, null]);
+  assert.deepEqual(rows.map((r) => r.isMax), [false, true, false, false]);
+  assert.equal(rows[3].status, 'error');
+  assert.deepEqual(promptScoreRows({}), []);
+  assert.match(PROMPT_MAX_NOTE, /최고 점수 한 건만/);
+  assert.match(SCOPE_NOTE[0], /한 회사의 5분 구간 전체 위험도/);
+});
+
+test('network breakdown uses server values only and marks missing parts as not provided', () => {
+  const b = { base_score: 50, probability_score: 18, retry_score: 0, repeat_score: null, total_score: 68,
+    threat: 'N1', threat_name: '비정상 대량 업로드' };
+  assert.equal(networkBreakdownText(b),
+    '네트워크 점수 68점 = 기본점수 50 + 모델 확률 점수 18 + 재시도 가산점 0 + 반복 가산점 미제공');
+  assert.equal(networkBreakdownParts(b).parts.find((p) => p.key === 'repeat_score').value, null);
+  assert.equal(networkBreakdownParts(null), null);
+  assert.equal(networkBreakdownText(undefined), '네트워크 점수 구성 정보 없음');
 });

@@ -1,4 +1,6 @@
-# 회사 전체 5분 통합 등급 API 계약 (v0.6)
+# 회사 전체 5분 통합 등급 API 계약 (v0.7)
+
+> v0.7: 회사 구간 응답에 `prompt_scores`, `network_score_breakdown` 추가(산식·등급 기준 변경 없음).
 
 통합 대상은 개인이 아니라 한 회사의 고정 5분 구간입니다. 한 서버/DB는 한 회사 전용이며 다른 회사 데이터를 같은 DB에 넣지 않습니다.
 
@@ -15,6 +17,12 @@
 `통합 점수 = 같은 구간의 프롬프트 최고 점수(최대 60) + 회사 전체 네트워크 점수(최대 100) × 0.4`
 
 예: 프롬프트 5, 20, 50점과 네트워크 70점 → 50 + 28 = 78점.
+
+최고 점수만 쓰는 이유: 합산하면 요청 수가 많을수록 점수가 부풀고(요청량은 네트워크 점수가 이미 반영), 평균하면 위험 프롬프트 한 건이 정상 요청에 묻힙니다. 대신 최고 점수 하나만 반영된다는 사실을 숨기지 않도록 `prompt_scores`로 구간의 모든 프롬프트 점수와 상태를, `prompt_source_capture_id/user_id`로 근거를 공개합니다.
+
+네트워크 점수 표시 예: `네트워크 점수 68점 = 기본점수 50 + 모델 확률 점수 18 + 재시도 가산점 0 + 반복 가산점 미제공`. 합계는 모델 정책대로 반올림·상한 100이 적용된 `network_score`이며 화면이 다시 계산하지 않습니다.
+
+이 결과는 한 명의 개인 위험도가 아니라 한 회사의 5분 구간 전체 위험도입니다. 시연(`examples/video_demo.py`)은 한 명의 가상 사용자로 구성되어 있으며, 모델 학습 데이터가 여러 사용자의 5분 집계라면 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.
 
 프롬프트 개별 산식은 유지합니다. 증류/교란 계수 0.6, 개인 목적 오남용/토큰 낭비 계수 0.8. 하나 이상 탐지 시 `min(60, 10 + (1 - 탐지 계수의 곱) × 60)`, 미탐지면 0점. 기본 10점은 한 번만 가산합니다. 확률은 위험도 점수가 아닙니다.
 
@@ -46,6 +54,8 @@
 | prompt_source_capture_id/user_id | 최고 점수의 근거 기록·사용자. 개인 위험 등급이 아님 |
 | network_score, network_contribution | 네트워크 원점수와 ×0.4 반영점수 |
 | capture_count | 소속 관측 수 |
+| prompt_scores | 구간 안 모든 프롬프트 결과 `[{capture_id, user_id, score, status}]`(capture_id 오름차순). status는 complete/pending(누락·미분석)/error이며 pending·error의 score는 null(0점 아님). 통합 점수에는 이 중 최고 점수 한 건만 반영 |
+| network_score_breakdown | 최신 네트워크 결과의 점수 구성 `{base_score, probability_score, retry_score, repeat_score, total_score, threat, threat_name, predicted_class, model_probability, retry_count}`. 네트워크 모델 보고서(`build_report`의 score_breakdown) 값을 그대로 복사. 반복 가산(REPEAT_KEY=None)이 꺼져 있으면 repeat_score는 null. 근거가 저장되지 않은 이전 결과는 전체가 null |
 | prompt_complete_count/missing_count/error_count | 개별 프롬프트 분석 상태별 건수 |
 | revision/network_revision | 입력 버전/분석된 입력 버전. 오래된 분석 결과의 덮어쓰기 방지 |
 | scoring_policy | company5m-promptmax60-network40-v2 |

@@ -2,7 +2,7 @@
 from typing import Literal
 import hashlib
 from pydantic import AwareDatetime, ConfigDict, Field, field_validator, model_validator
-from .schemas import AIUsageEvent, Count, Identifier, Model, NetworkSession, RiskResult
+from .schemas import AIUsageEvent, Count, Identifier, Model, NetworkScoreBreakdown, NetworkSession, RiskResult
 
 
 class PromptObservation(Model):
@@ -124,6 +124,15 @@ class Assessment(Model):
         return None if value == "unassessed" else value
 
 
+class PromptScore(Model):
+    """회사 구간에 속한 개별 프롬프트 결과 한 건. 최고 점수 선택 근거를 숨기지 않기 위해 모두 공개합니다."""
+    capture_id: str
+    user_id: str
+    # complete일 때만 점수가 있습니다. pending(누락·미분석)·error는 0점이 아니라 None입니다.
+    score: float | None = None
+    status: Literal["pending", "complete", "error"]
+
+
 class CompanyAssessment(Model):
     """한 배포 = 한 회사. 사용자별 등급이 아닌 고정 5분 구간의 전체 위험도."""
     id: str
@@ -142,8 +151,12 @@ class CompanyAssessment(Model):
     prompt_max_score: float | None = None
     prompt_source_capture_id: str | None = None
     prompt_source_user_id: str | None = None
+    # 구간 안 모든 프롬프트 결과(capture_id 오름차순). 통합 점수에는 이 중 최고 점수 한 건만 반영합니다.
+    prompt_scores: list[PromptScore] = Field(default_factory=list)
     network_score: float | None = None
     network_contribution: float | None = None
+    # 최신 네트워크 결과의 점수 구성. 모델 보고서에 근거가 없던 과거 결과는 None입니다.
+    network_score_breakdown: NetworkScoreBreakdown | None = None
     status: Literal["pending", "complete", "error"] = "pending"
     fusion_status: Literal["pending", "complete", "error"] = "pending"
     final_grade: Literal["normal", "caution", "warning", "danger"] | None = None

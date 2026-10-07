@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 
 from .engines import NETWORK_CATEGORIES
-from .schemas import BehaviorWindow, Finding, RiskResult
+from .schemas import BehaviorWindow, Finding, NetworkScoreBreakdown, RiskResult
 
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parents[2] / "model" / "network"
 
@@ -56,7 +56,19 @@ class XGBoostNetworkRiskEngine:
             proba = dict(zip(self.model.classes, self.model.booster.predict(matrix)[0].tolist()))
         return RiskResult(user_id=window.user_id, engine="network", engine_version=self.version,
                           window_id=window.id, status="complete", score=report["network_score"],
-                          findings=self.findings(report, proba))
+                          findings=self.findings(report, proba),
+                          score_breakdown=self.breakdown(report, proba, features.retry_count_after_block))
+
+    @staticmethod
+    def breakdown(report, proba, retry_count):
+        # 모델 보고서의 값을 그대로 옮깁니다. 보고서에 없는 반복 가산점(REPEAT_KEY=None)은 None으로 둡니다.
+        b = report["score_breakdown"]
+        return NetworkScoreBreakdown(
+            base_score=b["base_score"], probability_score=b["probability_score"], retry_score=b["retry_score"],
+            repeat_score=b.get("repeat_score"), total_score=report["network_score"],
+            threat=report["threat"], threat_name=report["threat_name"],
+            predicted_class=max(proba, key=proba.get), model_probability=report["model_probability"],
+            retry_count=int(retry_count))
 
     def findings(self, report, proba):
         threat = report["threat"]

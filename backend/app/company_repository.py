@@ -20,16 +20,22 @@ class CompanyRepository:
             ON a.kind='passive_assessment' AND a.id=m.capture_id WHERE m.window_id=? ORDER BY m.capture_id""",
             (window_id,)).fetchall()
         prompts = []
+        scores = []  # 화면 공개용: 최고 점수 외의 프롬프트 결과도 함께 보여 줍니다.
         errors = missing = 0
         for member in members:
             assessment = json.loads(member["payload"])
             data = next((r for r in assessment["results"] if r["engine"] == "data"), None)
             if data and data["status"] == "error":
                 errors += 1
+                status, score = "error", None
             elif data and data["status"] == "complete" and data.get("score") is not None and data.get("score_max") == 60:
                 prompts.append((assessment["id"], assessment["user_id"], data))
+                status, score = "complete", data["score"]
             else:
+                # 분석 대기·원문 누락·과거 100점 척도는 0점으로 바꾸지 않고 미판정으로 둡니다.
                 missing += 1
+                status, score = "pending", None
+            scores.append(dict(capture_id=assessment["id"], user_id=assessment["user_id"], score=score, status=status))
         # tie: stable capture ID order; maximum is never a sum or mean.
         winner = max(prompts, key=lambda p: p[2]["score"], default=None)
         network = next((r for r in group["results"] if r["engine"] == "network"), None)
@@ -49,6 +55,8 @@ class CompanyRepository:
                      prompt_source_user_id=winner[1] if winner else None,
                      network_score=network.get("score") if network else None,
                      network_contribution=round(network["score"] * .4, 2) if network and network.get("score") is not None else None,
+                     prompt_scores=scores,
+                     network_score_breakdown=network.get("score_breakdown") if network else None,
                      results=([winner[2]] if winner else []) + ([network] if network else []))
         if group["fusion_status"] == "complete":
             group["reason"] = "회사 전체 5분 구간: 프롬프트 최고 점수(60점) + 네트워크 점수 × 0.4(40점). 개인 등급이 아닙니다."

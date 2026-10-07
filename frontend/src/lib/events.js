@@ -131,3 +131,53 @@ export async function fetchEventPage(base, signal, fetcher = fetch, pages = 1) {
   }).map(normalizeEvent);
   return { events, total: Math.max(...results.map((page) => page.total)) };
 }
+
+// ---------------------------------------------------------------- 회사 5분 구간 설명
+// 화면 안내 문구입니다. 점수 정책을 바꾸지 않으며 backend/app/dashboard.py의 같은 문구와 맞춥니다.
+export const SCOPE_NOTE = [
+  '이 결과는 한 명의 개인 위험도가 아니라, 한 회사의 5분 구간 전체 위험도입니다.',
+  '현재 시연은 한 명의 가상 사용자로 구성되어 있습니다.',
+  '실제 모델 학습 데이터가 여러 사용자의 5분 집계라면, 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.',
+];
+export const PROMPT_MAX_NOTE = '통합 점수에는 구간 안 프롬프트 중 최고 점수 한 건만 반영합니다. '
+  + '합산하면 요청 수에 따라 점수가 부풀고, 평균하면 위험 프롬프트 한 건이 정상 요청에 묻히기 때문입니다. '
+  + '요청량·전송량은 네트워크 점수가 따로 반영합니다.';
+
+const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+
+// 구간의 프롬프트 점수 목록. 미판정·오류는 0점이 아니라 score=null로 둡니다. 최고 점수 근거 행에 isMax 표시.
+export function promptScoreRows(event) {
+  const rows = Array.isArray(event?.prompt_scores) ? event.prompt_scores : [];
+  return rows.map((p) => {
+    const status = ['complete', 'pending', 'error'].includes(p?.status) ? p.status : 'pending';
+    return {
+      captureId: String(p?.capture_id ?? '-'), userId: String(p?.user_id ?? '-'), status,
+      score: status === 'complete' && finite(p.score) ? p.score : null,
+      isMax: status === 'complete' && p.capture_id === event.prompt_source_capture_id,
+    };
+  });
+}
+
+// 네트워크 점수 구성. 서버(모델 보고서)가 준 값만 쓰고, 없는 항목은 null로 남겨 '미제공'으로 표시합니다.
+export function networkBreakdownParts(breakdown) {
+  if (!breakdown || !finite(breakdown.total_score)) return null;
+  const value = (v) => finite(v) ? v : null;
+  return {
+    total: breakdown.total_score,
+    threat: typeof breakdown.threat === 'string' ? breakdown.threat : null,
+    threatName: typeof breakdown.threat_name === 'string' ? breakdown.threat_name : '',
+    parts: [
+      { key: 'base_score', label: '기본점수', value: value(breakdown.base_score) },
+      { key: 'probability_score', label: '모델 확률 점수', value: value(breakdown.probability_score) },
+      { key: 'retry_score', label: '재시도 가산점', value: value(breakdown.retry_score) },
+      { key: 'repeat_score', label: '반복 가산점', value: value(breakdown.repeat_score) },
+    ],
+  };
+}
+
+export function networkBreakdownText(breakdown) {
+  const b = networkBreakdownParts(breakdown);
+  if (!b) return '네트워크 점수 구성 정보 없음';
+  const terms = b.parts.map((p, i) => `${i ? '+ ' : '= '}${p.label} ${p.value == null ? '미제공' : formatScore(p.value)}`);
+  return [`네트워크 점수 ${formatScore(b.total)}점`, ...terms].join(' ');
+}

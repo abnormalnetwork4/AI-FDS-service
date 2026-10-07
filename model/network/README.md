@@ -73,6 +73,7 @@
 1. 수집 이벤트 → `backend/app/services.py`의 `model_features()`가 학습과 같은 정의로 24개 피처를 계산해 Window의 `model_features`에 저장
 2. `XGBoostNetworkRiskEngine`이 `inference.py`의 `NetworkRiskEngine.explain()`으로 점수·근거 계산
 3. `RiskResult`로 변환: 전체 `score` = 네트워크 점수(0~100), findings = `network_score`(등급·점수 구성·SHAP 근거) + N1~N6(클래스 확률 %, N6 = N5+N6 클래스)
+4. `RiskResult.score_breakdown`: `build_report()`의 `score_breakdown`(base/probability/retry, 반복 가산을 켠 경우 repeat)과 `network_score`·`threat`를 그대로 옮긴 구조화 값. 회사 구간 응답의 `network_score_breakdown`으로 노출됩니다. 현재 `REPEAT_KEY=None`이라 보고서에 반복 가산점이 없으므로 `repeat_score`는 null(0점으로 채우지 않음). 백엔드 테스트가 Test 1,080개 창에서 구성 요소를 `test_network_scores.csv`와 대조합니다. 모델 파일·산식은 바꾸지 않았습니다.
 
 | 상황 | 결과 |
 | --- | --- |
@@ -107,6 +108,8 @@
 
 - **네트워크 강제 위험(≥ 35/40)은 지금 설정으로 거의 도달하지 않는다.** 네트워크 점수 87.5 이상이 필요한데, 최댓값은 N6 60 + 20 + 재시도 최대 10 = 90이고 Test 최댓값은 85(반영 34)다. 재시도 2회 이상인 N6만 해당된다. 기준을 낮출지(예: 30) 팀 결정이 필요하다.
 - **N3는 확률이 거의 1이면 정확히 50점이라 `경고` 경계에 걸린다.** (30 + 20 = 50)
+- **입력값만으로 원하는 등급을 보장할 수 없다.** 판정은 24개 피처의 조합이다. 전송량·파일 수를 키워도 반드시 위험 유형이 되지 않으며, 같은 5분 입력도 회사 DB의 최근 1시간 이력 유무에 따라 normal/N3/N5로 갈린 사례가 있다(`backend/examples/video_demo.py` 작업 중 확인). 시연 스크립트는 목표 등급과 실제 결과가 다르면 그대로 "다름"으로 표시한다.
+- **시연은 한 명의 가상 사용자 기준이다.** 학습 데이터는 여러 사용자의 5분 창이므로 실제 운영에서는 같은 수집 범위·사용자 규모로 검증해야 한다.
 - **회사 전체 위험도는 이 Test 데이터에서 항상 `위험`이다.** Test 창의 75%가 위협이고 모든 5분 시간대에 N6 창이 있는 시뮬레이션이라서다. 시연에서는 시나리오를 따로 구성해야 한다.
 - **재시도 가산점은 효과를 검증할 수 없다.** 원천 열(`retry_count_after_block`)이 이 데이터에서 N6 정답과 완전히 겹친다. 모델 입력에는 넣지 않았다.
 - **최근 1시간 누적 피처 4개(`user_*_observed_1h`, `history_*_1h`)**는 개인 기준선은 아니지만 같은 출발지의 직전 1시간을 모아야 계산된다. 빼려면 노트북의 `DROP_1H_HISTORY = True`.

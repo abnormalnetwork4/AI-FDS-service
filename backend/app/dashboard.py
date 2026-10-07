@@ -3,7 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .contracts import Assessment, CompanyAssessment
+from .contracts import Assessment, CompanyAssessment, PromptScore
+from .schemas import NetworkScoreBreakdown
 from .schemas import Finding, NetworkSession
 
 
@@ -51,6 +52,29 @@ class DashboardEvent(BaseModel):
     network_contribution: float | None = None
     prompt_missing_count: int = 0
     prompt_error_count: int = 0
+    prompt_complete_count: int = 0
+    prompt_scores: list[PromptScore] = Field(default_factory=list)
+    network_score_breakdown: NetworkScoreBreakdown | None = None
+
+
+# 화면·요약에 같은 문구를 쓰기 위한 설명입니다. 점수 정책을 바꾸지 않습니다.
+SCOPE_NOTE = ("이 결과는 한 명의 개인 위험도가 아니라, 한 회사의 5분 구간 전체 위험도입니다. "
+              "현재 시연은 한 명의 가상 사용자로 구성되어 있습니다. "
+              "실제 모델 학습 데이터가 여러 사용자의 5분 집계라면, 실제 운영에서는 동일한 수집 범위와 사용자 규모로 검증해야 합니다.")
+PROMPT_MAX_NOTE = ("프롬프트는 구간 안 최고 점수 한 건만 통합 점수에 반영합니다. 합산하면 요청 수가 많을수록 점수가 부풀고, "
+                   "평균하면 위험 프롬프트 한 건이 정상 요청에 묻히기 때문입니다. 요청량·전송량은 네트워크 점수가 따로 반영합니다.")
+
+
+def breakdown_text(b):
+    """모델이 준 구성 요소만 나열합니다. 없는 항목(None)은 '미제공'으로 표시하고 0점으로 꾸미지 않습니다."""
+    if b is None:
+        return "네트워크 점수 구성: 저장된 근거 없음(이전 버전 결과)."
+    if b.threat == "normal":
+        return f"네트워크 점수 {b.total_score:g}점 = 정상 판정 → 0점 (모델 확률 {b.model_probability or 0:.1%})."
+    repeat = "미제공(반복 가산 비활성)" if b.repeat_score is None else f"{b.repeat_score:g}"
+    return (f"네트워크 점수 {b.total_score:g}점 [{b.threat} {b.threat_name}] = 기본점수 {b.base_score:g} "
+            f"+ 모델 확률 점수 {b.probability_score:g} + 재시도 가산점 {b.retry_score:g} + 반복 가산점 {repeat}"
+            " (합계는 반올림·상한 100 적용).")
 
 
 class DashboardPage(BaseModel):
@@ -142,6 +166,8 @@ def present_company(raw):
         prompt_source_capture_id=group.prompt_source_capture_id, prompt_source_user_id=group.prompt_source_user_id,
         network_score=group.network_score, network_contribution=group.network_contribution,
         prompt_missing_count=group.prompt_missing_count, prompt_error_count=group.prompt_error_count,
+        prompt_complete_count=group.prompt_complete_count, prompt_scores=group.prompt_scores,
+        network_score_breakdown=group.network_score_breakdown,
         network_reasons=evidence["network"], prompt_reasons=evidence["data"])
 
 
@@ -153,6 +179,15 @@ def explain_company(raw):
         lines.append(f"프롬프트 최고 {group.prompt_max_score:g}/60 + 네트워크 {group.network_score:g} × 0.4 = {group.score:g}/100점. 등급: {group.final_grade}.")
     if group.prompt_source_capture_id:
         lines.append(f"최고 점수 근거 캡처: {group.prompt_source_capture_id}, 사용자: {group.prompt_source_user_id}. 개인의 통합 위험 등급을 뜻하지 않습니다.")
+    lines.append(f"프롬프트 분석 {group.capture_count}건 중 완료 {group.prompt_complete_count}, "
+                 f"미판정 {group.prompt_missing_count}, 오류 {group.prompt_error_count}. {PROMPT_MAX_NOTE}")
+    if group.prompt_scores:
+        lines.append("구간 프롬프트 점수: " + ", ".join(
+            f"{p.capture_id}({p.user_id}) {'미판정' if p.status == 'pending' else '오류' if p.status == 'error' else f'{p.score:g}'}"
+            for p in group.prompt_scores))
+    if group.network_score is not None:
+        lines.append(breakdown_text(group.network_score_breakdown))
+    lines.append(SCOPE_NOTE)
     lines.extend(group.override_reasons)
     for result in group.results:
         lines.extend(f"{f.name}: {f.reason}" for f in result.findings)

@@ -1,4 +1,4 @@
-import { LEVELS, MAX_PAGES, PAGE_SIZE, eventLevel, fetchEventPage, formatScore, isNotable, isSummaryItem, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -658,6 +658,59 @@ function SkeletonDetail() {
 
 /* ───────────────────────── 메인 ───────────────────────── */
 
+// 회사 구간의 프롬프트 점수 목록과 네트워크 점수 구성. 서버 값만 표시하고 없는 값은 미제공/미판정으로 둡니다.
+function CompanyBreakdown({ event }) {
+  const rows = promptScoreRows(event);
+  const network = networkBreakdownParts(event.network_score_breakdown);
+  const statusLabel = { complete: "완료", pending: "미판정", error: "오류" };
+  return (
+    <div className="company-breakdown">
+      <section className="company-breakdown__col">
+        <h4>프롬프트 분석 {event.capture_count ?? 0}건 · 최고 점수만 반영</h4>
+        <p className="company-breakdown__counts">
+          완료 {event.prompt_complete_count ?? 0} · 미판정 {event.prompt_missing_count ?? 0} · 오류 {event.prompt_error_count ?? 0}
+          {" "}· 최고 {formatScore(event.prompt_max_score)}/60
+        </p>
+        <p className="company-breakdown__note">{PROMPT_MAX_NOTE} 미판정·오류는 0점으로 바꾸지 않으며, 하나라도 있으면 통합 점수는 미판정입니다.</p>
+        {rows.length > 0 ? (
+          <div className="company-breakdown__table">
+            <table>
+              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.captureId} className={r.isMax ? "is-max" : ""}>
+                    <td title={r.captureId}>{r.captureId}{r.isMax && <b> · 반영</b>}</td>
+                    <td>{r.userId}</td>
+                    <td>{r.score == null ? "—" : `${formatScore(r.score)}/60`}</td>
+                    <td>{statusLabel[r.status]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="company-breakdown__note">개별 프롬프트 점수 목록이 없는 이전 구간입니다.</p>}
+      </section>
+      <section className="company-breakdown__col">
+        <h4>네트워크 점수 구성{network?.threat ? ` · ${network.threat} ${network.threatName}` : ""}</h4>
+        {network ? (
+          <>
+            <p className="company-breakdown__formula">{networkBreakdownText(event.network_score_breakdown)}</p>
+            <ul>
+              {network.parts.map((p) => (
+                <li key={p.key}><span>{p.label}</span><b>{p.value == null ? "미제공" : formatScore(p.value)}</b></li>
+              ))}
+            </ul>
+            <p className="company-breakdown__note">
+              네트워크 모델 보고서의 값을 그대로 표시합니다(합계는 반올림·상한 100 적용). 반영 점수 = {formatScore(network.total)} × 0.4 = {formatScore(event.network_contribution)}/40.
+              반복 가산점 '미제공'은 현재 모델 설정에서 반복 가산을 쓰지 않는다는 뜻입니다.
+            </p>
+          </>
+        ) : <p className="company-breakdown__note">네트워크 점수 구성 정보가 없습니다(분석 대기 또는 이전 버전 결과).</p>}
+      </section>
+    </div>
+  );
+}
+
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
   const { events, total, mode, status, error, lastOkAt, isMock, advance, refresh, hasMore, capped, loadingMore, loadMore } = useEvents({ live });
@@ -1031,6 +1084,21 @@ export default function RiskDashboard() {
         .list-more button:disabled { opacity: .6; cursor: default; }
         .collapse-btn { display: flex; align-items: center; gap: 5px; margin-top: 22px; background: transparent; border: none; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 4px 0; }
 
+        .company-breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
+        .company-breakdown__col { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--panel); min-width: 0; }
+        .company-breakdown__col h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; }
+        .company-breakdown__counts, .company-breakdown__formula { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+        .company-breakdown__note { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+        .company-breakdown__table { max-height: 220px; overflow: auto; margin-top: 8px; }
+        .company-breakdown table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+        .company-breakdown th, .company-breakdown td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--tint); }
+        .company-breakdown th { color: var(--text-dim); font-weight: 600; }
+        .company-breakdown th:first-child { width: 48%; }
+        .company-breakdown td { white-space: nowrap; }
+        .company-breakdown td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
+        .company-breakdown tr.is-max td { background: var(--accent-soft); }
+        .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+        .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
         .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
         .llm-box__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; gap: 10px; flex-wrap: wrap; }
         .llm-box__title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--accent); }
@@ -1274,9 +1342,12 @@ export default function RiskDashboard() {
                 <p>프롬프트 최고 {formatScore(selected.prompt_max_score)}/60 + 네트워크 {formatScore(selected.network_score)} × 0.4 = {formatScore(selected.score)}/100</p>
                 {selected.prompt_source_capture_id && <p>최고 점수 근거: {selected.prompt_source_capture_id} · 사용자 {selected.prompt_source_user_id}</p>}
                 <p>{selected.reason}</p>
-                <p>회사 전체 구간의 위험도입니다. 개인 등급이 아니며, 늦게 도착한 기록이 있으면 갱신됩니다.</p>
+                {SCOPE_NOTE.map((line) => <p key={line}>{line}</p>)}
+                <p>늦게 도착한 기록이 있으면 구간 결과가 갱신됩니다.</p>
               </div>
             )}
+
+            {selected.scope === "company" && <CompanyBreakdown event={selected} />}
 
             <div className="detail-main">
               <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />

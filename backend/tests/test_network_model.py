@@ -38,6 +38,15 @@ def test_adapter_matches_notebook_scores_on_test_split(engine):
         reference = expected.loc[row["window_id"]]
         assert result.status == "complete"
         assert result.score == pytest.approx(reference.network_score)
+        # 점수 구성 요소는 노트북 점수표의 실제 값과 같아야 하며 합계는 결과 점수와 같아야 합니다.
+        b = result.score_breakdown
+        assert b.total_score == result.score
+        assert b.threat == reference.threat and b.predicted_class == reference.predicted_class
+        assert b.base_score == reference.base_score and b.retry_score == reference.retry_score
+        assert b.probability_score == pytest.approx(reference.probability_score, abs=0.05)
+        assert b.retry_count == reference.retry_count
+        assert b.repeat_score is None  # REPEAT_KEY=None: 모델이 제공하지 않으므로 0으로 꾸미지 않음
+        assert min(100, b.base_score + b.probability_score + b.retry_score) == pytest.approx(b.total_score, abs=0.1)
         assert f"[{reference.network_grade}]" in result.findings[0].name
         assert f"] {reference.threat} " in result.findings[0].name
 
