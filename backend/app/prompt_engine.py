@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 
 from .engines import DATA_CATEGORIES
 from .schemas import DataRiskRequest, Finding, Identifier, RiskResult
-from .scoring import PROMPT_POLICY, prompt_score
+from .scoring import PROMPT_POLICY, PROMPT_REPEAT_POLICY, prompt_score
 from .prompt_occurrences import (
     OCCURRENCE_ANALYSIS_VERSION, OccurrenceAnalysisLimitError, PromptRiskResult, analyze_sentence_occurrences,
 )
@@ -117,7 +117,10 @@ class AllInOneDataRiskEngine:
             )
             counted_findings = [finding.model_dump() | {"occurrence_count": analysis["label_occurrence_counts"][finding.code]}
                                 for finding in result.findings]
-            return PromptRiskResult.model_validate(payload | analysis | {"findings": counted_findings})
+            # 반복 횟수를 점수에 반영합니다(같은 곱셈식, 라벨당 최대 3회). 탐지 여부·확률은 바꾸지 않습니다.
+            score = prompt_score([Finding.model_validate(f) for f in counted_findings])
+            return PromptRiskResult.model_validate(payload | analysis | {
+                "findings": counted_findings, "score": score, "scoring_policy": PROMPT_REPEAT_POLICY})
         except OccurrenceAnalysisLimitError:
             error = {"code": "occurrence_limit_exceeded", "message": "문장 분석의 길이 또는 문장 수 제한을 초과함."}
         except Exception:

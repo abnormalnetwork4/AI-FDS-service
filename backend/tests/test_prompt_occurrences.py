@@ -95,7 +95,7 @@ def test_repeated_identical_sentences_count_separate_positions():
     assert [finding.occurrence_count for finding in result.findings] == [0, 2, 0, 0]
     assert [item.start for item in result.occurrences] == [2, 17]
     assert len({item.event_id for item in result.occurrences}) == 2
-    assert result.score == 34.0
+    assert result.score == 48.4  # 인젝션 2회: 10 + (1 - 0.6²) × 60 (1회면 34)
     assert all(finding.probability == (.9 if finding.code == "prompt_injection" else .1) for finding in result.findings)
     assert engine.vectorizer.calls[0] == ["😀 INJECTION.\n INJECTION."]
 
@@ -125,7 +125,7 @@ def test_exact_threshold_and_multiple_labels():
     assert boundary.label_occurrence_counts == dict.fromkeys(LABELS, 0)
     mixed = analyze("DISTILL INJECTION. ABUSE. WASTE. INJECTION.")
     assert mixed.label_occurrence_counts == dict(AI_steal=1, prompt_injection=2, abuse_act=1, token_waste_repeat=1)
-    assert mixed.score == 56.2  # 횟수는 기존 점수에 재가산하지 않습니다.
+    assert mixed.score == 60.0  # 반복 반영 후 60점 상한 (반복 미반영이면 56.2)
 
 
 def test_reprocessing_ids_are_stable_but_requests_positions_and_raw_text_are_distinct():

@@ -677,7 +677,7 @@ function CompanyBreakdown({ event }) {
         {rows.length > 0 ? (
           <div className="company-breakdown__table">
             <table>
-              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th>{hasOccurrence && <th title="문장별 반복 횟수(참고, 점수 미반영)">반복</th>}</tr></thead>
+              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th>{hasOccurrence && <th title="문장별 반복 횟수(점수 반영, 라벨당 최대 3회)">반복</th>}</tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.captureId} className={r.isMax ? "is-max" : ""}>
@@ -778,12 +778,12 @@ function OccurrenceRow({ event }) {
   const s = occurrenceSummary(event);
   if (!s) return null;
   return (
-    <div className="window-card__occurrence" title="같은 위험 라벨이 몇 문장에서 탐지됐는지 셉니다. 점수·등급에는 반영하지 않습니다.">
+    <div className="window-card__occurrence" title="같은 위험 라벨이 몇 문장에서 탐지됐는지 셉니다. 반복될수록 탐지 계수를 한 번 더 곱해 프롬프트 점수가 올라갑니다(라벨당 최대 3회).">
       <span>반복 탐지</span>
       {s.detected.length
         ? s.detected.map((i) => <b key={i.code} className={i.count > 1 ? "is-repeat" : ""}>{i.label} {i.count}회</b>)
         : <span className="window-card__muted">탐지된 항목 없음</span>}
-      <span className="window-card__muted">프롬프트 {s.counted}/{s.total}건 집계 · 점수 미반영</span>
+      <span className="window-card__muted">프롬프트 {s.counted}/{s.total}건 집계 · 점수 반영(최대 3회)</span>
     </div>
   );
 }

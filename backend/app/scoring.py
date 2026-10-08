@@ -8,6 +8,10 @@ PROMPT_BASE = 10.0  # 하나 이상 탐지됐을 때 한 번만 부여합니다.
 PROMPT_MAX = 60.0
 PROMPT_FACTORS = {"AI_steal": .6, "prompt_injection": .6, "abuse_act": .8, "token_waste_repeat": .8}
 PROMPT_POLICY = "prompt-product-base10-v1"
+# 문장별 반복 횟수를 반영한 정책: 탐지 라벨의 계수를 반복 횟수만큼 곱합니다(라벨당 최대 3회까지).
+# 반복 횟수 분석이 성공한 결과에만 씁니다. 횟수가 없으면(분석 안 함·실패) 1회로 보고 기존 정책과 같은 값을 냅니다.
+PROMPT_REPEAT_CAP = 3
+PROMPT_REPEAT_POLICY = "prompt-product-base10-repeat3-v2"
 FUSION_POLICY = "prompt60-network40-v1"
 
 
@@ -15,7 +19,9 @@ def prompt_score(findings):
     flags = {finding.code: finding.detected for finding in findings}
     if set(flags) != set(PROMPT_FACTORS) or any(type(flag) is not bool for flag in flags.values()):
         raise ValueError("Prompt scoring requires all four detection results")
-    active = [factor for code, factor in PROMPT_FACTORS.items() if flags[code]]
+    counts = {finding.code: getattr(finding, "occurrence_count", None) for finding in findings}
+    active = [factor ** min(PROMPT_REPEAT_CAP, max(1, counts[code] or 1))
+              for code, factor in PROMPT_FACTORS.items() if flags[code]]
     return round(min(PROMPT_MAX, PROMPT_BASE + (1 - prod(active)) * PROMPT_MAX), 1) if active else 0.0
 
 

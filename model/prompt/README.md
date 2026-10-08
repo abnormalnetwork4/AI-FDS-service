@@ -56,7 +56,7 @@ payload = result.model_dump(mode="json")
 | `occurrences` | 실제 집계 단위의 라벨·위치·출처·재처리 식별자 `event_id` |
 | `occurrence_error` | 분석 실패 또는 제한 초과의 고정 오류 코드·메시지 |
 
-전체 프롬프트에서 탐지된 라벨만 문장별 횟수에 반영합니다. 같은 문장이 다른 위치에서 반복되면 각각 셉니다. 전체에서만 탐지된 라벨은 1회로 유지하고 `source=whole_prompt_fallback`, `sentence_index=null`로 구분합니다. 기존 전체 판정·확률·점수는 횟수 때문에 바꾸지 않습니다.
+전체 프롬프트에서 탐지된 라벨만 문장별 횟수에 반영합니다. 같은 문장이 다른 위치에서 반복되면 각각 셉니다. 전체에서만 탐지된 라벨은 1회로 유지하고 `source=whole_prompt_fallback`, `sentence_index=null`로 구분합니다. 기존 전체 판정·확률은 횟수 때문에 바꾸지 않습니다. 점수는 백엔드 v0.9부터 반복을 반영합니다(탐지 계수를 반복 횟수만큼 곱함, 라벨당 최대 3회, 정책 `prompt-product-base10-repeat3-v2`). 횟수 분석이 실패하면 기존 점수를 그대로 씁니다.
 
 인용문·코드·URL·이메일·소수점·영문 약어의 내부 구두점을 보호하며, 원문 위치는 Python Unicode 코드 포인트 기준의 `[start, end)`입니다. JavaScript의 UTF-16 문자열 인덱스로 바로 사용하면 안 됩니다. 256문장 초과 또는 보조 분석 실패는 `occurrence_status=error`로 전달하며 횟수와 상세를 모두 `null`로 둡니다. 부분 집계나 0회로 대체하지 않습니다.
 

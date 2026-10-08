@@ -233,7 +233,7 @@ class RiskResult(Model):
     findings: list[Finding]
     # 네트워크 엔진만 채웁니다. 이전에 저장된 결과에는 없으며, 그 경우 추측해서 만들지 않습니다.
     score_breakdown: NetworkScoreBreakdown | None = None
-    # 프롬프트 엔진의 문장별 반복 횟수 분석 상태(sentence-occurrence-v1). 점수·등급에는 쓰지 않습니다.
+    # 프롬프트 엔진의 문장별 반복 횟수 분석 상태(sentence-occurrence-v1). 성공하면 프롬프트 점수에 반복을 반영합니다(scoring.PROMPT_REPEAT_POLICY).
     # None: 분석하지 않음(이전 기록·다른 엔진). error: 실패해서 횟수는 모두 None.
     occurrence_status: Literal["ok", "error"] | None = None
     occurrence_analysis_version: str | None = None

@@ -16,7 +16,9 @@ def test_ingest_stores_counts_without_changing_score(tmp_path):
         user_id="a", text="INJECTION. INJECTION. 업무."))
     ingest(repo, body("c1", "INJECTION. INJECTION. 업무."), engine, Network())
     stored = data_result(repo, "c1")
-    assert stored["score"] == plain.score  # 횟수가 점수를 바꾸지 않음
+    # 반복 반영: 인젝션 2회 → 10 + (1 - 0.6²) × 60 = 48.4 (1회일 때 34)
+    assert plain.score == 34 and stored["score"] == 48.4
+    assert stored["scoring_policy"] == "prompt-product-base10-repeat3-v2"
     assert stored["occurrence_status"] == "ok" and stored["sentence_count"] == 3
     counts = {f["code"]: f["occurrence_count"] for f in stored["findings"]}
     assert counts == {"AI_steal": 0, "prompt_injection": 2, "abuse_act": 0, "token_waste_repeat": 0}
@@ -36,7 +38,7 @@ def test_window_sums_counts_and_discloses_how_many_were_counted(tmp_path):
     event = present_window(group)
     assert event.prompt_occurrence_counts["prompt_injection"] == 3
     text = explain_window(group).text
-    assert "프롬프트 인젝션 3회" in text and "2/2건 집계" in text and "반영하지 않습니다" in text
+    assert "프롬프트 인젝션 3회" in text and "2/2건 집계" in text and "점수에 반영됩니다" in text
 
 
 def test_engines_without_counting_and_failed_counting_stay_null(tmp_path):
@@ -50,9 +52,26 @@ def test_engines_without_counting_and_failed_counting_stay_null(tmp_path):
     # 문장 분석만 실패: 기존 판정·점수는 유지, 횟수는 0이 아니라 None
     second = ingest(repo, body("f1", "INJECTION. SENTENCE_FAILURE.", user="b"), make_engine(), net)
     stored = data_result(repo, "f1")
-    assert stored["status"] == "complete" and stored["score"] is not None
+    assert stored["status"] == "complete" and stored["score"] == 34  # 횟수 실패 → 1회로 보고 기존 점수
+    assert stored["scoring_policy"] == "prompt-product-base10-v1"
     assert stored["occurrence_status"] == "error" and stored["occurrence_error_code"] == "occurrence_analysis_failed"
     assert all(f["occurrence_count"] is None for f in stored["findings"])
     group = window(repo, second)
     assert group["prompt_occurrence_counts"] is None
     assert group["prompt_scores"][0]["occurrence_status"] == "error"
+
+
+def test_repeat_scoring_caps_at_three_and_combines_labels():
+    from app.schemas import Finding
+    from app.scoring import prompt_score
+    def f(code, n):
+        return Finding(code=code, name=code, status="complete", detected=n > 0, probability=.9 if n else .1,
+                       threshold=.45, reason="t", occurrence_count=n)
+    base = [f("AI_steal", 0), f("abuse_act", 0), f("token_waste_repeat", 0)]
+    assert prompt_score(base + [f("prompt_injection", 1)]) == 34.0
+    assert prompt_score(base + [f("prompt_injection", 3)]) == 57.0
+    assert prompt_score(base + [f("prompt_injection", 9)]) == 57.0  # 3회 상한
+    no_counts = [Finding(code=c, name=c, status="complete", detected=c == "prompt_injection",
+                         probability=.9 if c == "prompt_injection" else .1, threshold=.45, reason="t")
+                 for c in ("AI_steal", "prompt_injection", "abuse_act", "token_waste_repeat")]
+    assert prompt_score(no_counts) == 34.0  # 횟수 없음 → 기존 정책과 같음

@@ -74,14 +74,14 @@ OCCURRENCE_LABELS = {"AI_steal": "AI 탈취", "prompt_injection": "프롬프트 
 
 
 def occurrence_text(group):
-    """반복 횟수 요약(참고). 횟수 분석이 끝난 프롬프트만 세며 점수·등급에는 반영하지 않습니다."""
+    """반복 횟수 요약. 횟수 분석이 끝난 프롬프트만 셉니다. 반복은 각 프롬프트 점수에 이미 반영돼 있습니다."""
     counts = getattr(group, "prompt_occurrence_counts", None)
     if not counts:
         return None
     detected = [f"{OCCURRENCE_LABELS.get(k, k)} {v}회" for k, v in counts.items() if v]
     body = ", ".join(detected) if detected else "탐지된 반복 없음"
     return (f"문장별 반복 횟수(프롬프트 {group.prompt_occurrence_capture_count}/{group.capture_count}건 집계): {body}. "
-            "참고 정보이며 점수·등급에는 반영하지 않습니다.")
+            "반복은 프롬프트 점수에 반영됩니다(탐지 계수를 반복 횟수만큼 곱함, 라벨당 최대 3회).")
 
 
 def breakdown_text(b):
