@@ -55,6 +55,8 @@ class DashboardEvent(BaseModel):
     prompt_error_count: int = 0
     prompt_complete_count: int = 0
     prompt_scores: list[PromptScore] = Field(default_factory=list)
+    prompt_occurrence_counts: dict[str, int] | None = None
+    prompt_occurrence_capture_count: int = 0
     network_score_breakdown: NetworkScoreBreakdown | None = None
 
 
@@ -65,6 +67,21 @@ SCOPE_NOTE = ("이 결과는 한 사용자·한 단말의 5분 구간 위험도�
               "현재 시연은 가상 사용자로 구성되어 있으므로, 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.")
 PROMPT_MAX_NOTE = ("프롬프트는 구간 안 최고 점수 한 건만 통합 점수에 반영합니다. 합산하면 요청 수가 많을수록 점수가 부풀고, "
                    "평균하면 위험 프롬프트 한 건이 정상 요청에 묻히기 때문입니다. 요청량·전송량은 네트워크 점수가 따로 반영합니다.")
+
+
+OCCURRENCE_LABELS = {"AI_steal": "AI 탈취", "prompt_injection": "프롬프트 인젝션",
+                     "abuse_act": "악용 행위", "token_waste_repeat": "토큰 낭비·반복"}
+
+
+def occurrence_text(group):
+    """반복 횟수 요약(참고). 횟수 분석이 끝난 프롬프트만 세며 점수·등급에는 반영하지 않습니다."""
+    counts = getattr(group, "prompt_occurrence_counts", None)
+    if not counts:
+        return None
+    detected = [f"{OCCURRENCE_LABELS.get(k, k)} {v}회" for k, v in counts.items() if v]
+    body = ", ".join(detected) if detected else "탐지된 반복 없음"
+    return (f"문장별 반복 횟수(프롬프트 {group.prompt_occurrence_capture_count}/{group.capture_count}건 집계): {body}. "
+            "참고 정보이며 점수·등급에는 반영하지 않습니다.")
 
 
 def breakdown_text(b):
@@ -177,6 +194,8 @@ def present_window(raw):
         network_score=group.network_score, network_contribution=group.network_contribution,
         prompt_missing_count=group.prompt_missing_count, prompt_error_count=group.prompt_error_count,
         prompt_complete_count=group.prompt_complete_count, prompt_scores=group.prompt_scores,
+        prompt_occurrence_counts=group.prompt_occurrence_counts,
+        prompt_occurrence_capture_count=group.prompt_occurrence_capture_count,
         network_score_breakdown=group.network_score_breakdown,
         network_reasons=evidence["network"], prompt_reasons=evidence["data"])
 
@@ -253,6 +272,9 @@ def explain_window(raw):
         lines.append("구간 프롬프트 점수: " + ", ".join(
             f"{p.capture_id}({p.user_id}) {'미판정' if p.status == 'pending' else '오류' if p.status == 'error' else f'{p.score:g}'}"
             for p in group.prompt_scores))
+    occurrence = occurrence_text(group)
+    if occurrence:
+        lines.append(occurrence)
     if group.network_score is not None:
         lines.append(breakdown_text(group.network_score_breakdown))
     lines.append(SCOPE_NOTE)

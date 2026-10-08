@@ -41,6 +41,8 @@ result = engine.analyze_with_occurrences(
 payload = result.model_dump(mode="json")
 ```
 
+> 백엔드 연결(v0.8.2): 수집(`collection.analyze_safely`)이 이 진입점을 자동으로 사용하고, 요약 필드만 공통 `RiskResult`에 저장합니다. 저장·화면 형식은 `backend/grade-api-contract.md`의 '반복 횟수' 절을 따릅니다.
+
 새 반환 형식은 엔진 전용 `PromptRiskResult`입니다. 기존 공통 `RiskResult`에 바로 넣는 대신, 백엔드에서 아래 선택 필드와 nullable 횟수를 응답·저장 형식에 반영해야 합니다.
 
 | 필드 | 의미 |

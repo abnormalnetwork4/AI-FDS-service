@@ -1,4 +1,4 @@
-import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, occurrenceSummary, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import RiskOverview from "./RiskOverview.jsx";
@@ -664,6 +664,7 @@ function CompanyBreakdown({ event }) {
   const rows = promptScoreRows(event);
   const network = networkBreakdownParts(event.network_score_breakdown);
   const statusLabel = { complete: "완료", pending: "미판정", error: "오류" };
+  const hasOccurrence = rows.some((r) => r.occurrence != null);
   return (
     <div className="company-breakdown">
       <section className="company-breakdown__col">
@@ -676,7 +677,7 @@ function CompanyBreakdown({ event }) {
         {rows.length > 0 ? (
           <div className="company-breakdown__table">
             <table>
-              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th></tr></thead>
+              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th>{hasOccurrence && <th title="문장별 반복 횟수(참고, 점수 미반영)">반복</th>}</tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.captureId} className={r.isMax ? "is-max" : ""}>
@@ -684,6 +685,7 @@ function CompanyBreakdown({ event }) {
                     <td>{r.userId}</td>
                     <td>{r.score == null ? "—" : `${formatScore(r.score)}/60`}</td>
                     <td>{statusLabel[r.status]}</td>
+                    {hasOccurrence && <td>{r.occurrence ?? "—"}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -757,6 +759,7 @@ function WindowSummaryCard({ event }) {
           {event.prompt_source_user_id && event.prompt_source_user_id !== event.user && <span className="window-card__muted">사용자 {event.prompt_source_user_id}</span>}
         </div>
       )}
+      <OccurrenceRow event={event} />
       {event.fusion_status !== "complete" && <p className="window-card__reason">{event.reason}</p>}
 
       <details className="window-card__notes">
@@ -766,6 +769,21 @@ function WindowSummaryCard({ event }) {
           <li>늦게 도착한 기록이 있으면 구간 결과가 갱신됩니다.</li>
         </ul>
       </details>
+    </div>
+  );
+}
+
+// 문장별 반복 횟수(참고). 서버가 집계한 구간에서만 보이며 점수·등급과 무관합니다.
+function OccurrenceRow({ event }) {
+  const s = occurrenceSummary(event);
+  if (!s) return null;
+  return (
+    <div className="window-card__occurrence" title="같은 위험 라벨이 몇 문장에서 탐지됐는지 셉니다. 점수·등급에는 반영하지 않습니다.">
+      <span>반복 탐지</span>
+      {s.detected.length
+        ? s.detected.map((i) => <b key={i.code} className={i.count > 1 ? "is-repeat" : ""}>{i.label} {i.count}회</b>)
+        : <span className="window-card__muted">탐지된 항목 없음</span>}
+      <span className="window-card__muted">프롬프트 {s.counted}/{s.total}건 집계 · 점수 미반영</span>
     </div>
   );
 }
@@ -1297,6 +1315,10 @@ export default function RiskDashboard() {
         .score-tile__sub { font-size: 11.5px; color: var(--text-dim); }
         .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; min-width: 0; }
         .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
+        .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 12px; }
+        .window-card__occurrence > span:first-child { color: var(--text-dim); }
+        .window-card__occurrence b { font-weight: 600; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+        .window-card__occurrence b.is-repeat { border-color: #EAB308; }
         .window-card__source code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .window-card__muted { color: var(--text-dim); flex-shrink: 0; }
         .window-card__reason { margin: 10px 0 0; font-size: 12.5px; color: #B58500; }

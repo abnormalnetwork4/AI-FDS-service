@@ -8,9 +8,31 @@ from .schemas import OPTIONAL_EVENT_FIELDS, DataRiskRequest, Finding, RiskResult
 from .windows import refresh_window
 
 
+# PromptRiskResult에서 저장할 요약 필드. 문장별 위치·확률 상세는 저장하지 않습니다(화면에 쓰지 않고 크기만 늘어남).
+OCCURRENCE_FIELDS = ("occurrence_status", "occurrence_analysis_version", "sentence_count")
+
+
+def occurrence_summary(prompt_result):
+    """엔진 전용 반복 횟수 결과를 공통 RiskResult로 줄입니다. 점수·판정·확률은 그대로 둡니다."""
+    raw = prompt_result.model_dump(mode="json")
+    error = raw.pop("occurrence_error", None)
+    status = raw.get("occurrence_status")
+    summary = {k: v for k, v in raw.items() if k in RiskResult.model_fields}
+    summary.update({k: raw.get(k) for k in OCCURRENCE_FIELDS})
+    if status == "not_analyzed":
+        summary.update(occurrence_status=None, occurrence_analysis_version=None)
+    summary["occurrence_error_code"] = error["code"] if status == "error" and error else None
+    return summary
+
+
 def analyze_safely(engine, value, user_id, engine_name, event_id, window_id=None):
     try:
-        result = RiskResult.model_validate(engine.analyze(value))
+        if engine_name == "data" and callable(getattr(engine, "analyze_with_occurrences", None)):
+            # 반복 횟수 집계를 지원하는 프롬프트 엔진. 횟수 분석이 실패해도 엔진이 기존 판정·점수를 그대로 돌려줍니다.
+            raw = occurrence_summary(engine.analyze_with_occurrences(value, request_id=event_id))
+        else:
+            raw = engine.analyze(value)
+        result = RiskResult.model_validate(raw)
         if result.user_id != user_id or result.engine != engine_name:
             raise ValueError("Engine returned mismatched identity")
         return result.model_copy(update={"source_event_id": event_id, "window_id": window_id})

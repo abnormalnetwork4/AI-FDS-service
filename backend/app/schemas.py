@@ -174,6 +174,8 @@ class Finding(Model):
     threshold: Annotated[float, Field(gt=0, lt=1, allow_inf_nan=False)] | None = None
     detection_method: Literal["threshold", "argmax"] | None = None
     reason: str
+    # 문장별 반복 횟수(최초 탐지 포함). 횟수 분석을 하지 않았거나 실패하면 0이 아니라 None입니다.
+    occurrence_count: Count | None = None
 
     @model_validator(mode="after")
     def score_matches_status(self):
@@ -192,6 +194,8 @@ class Finding(Model):
                 raise ValueError("Threshold classification requires a threshold")
             elif self.detected != (self.probability > self.threshold):
                 raise ValueError("Classification must match its probability threshold")
+        if self.occurrence_count is not None and (self.detected is None or (self.occurrence_count > 0) != self.detected):
+            raise ValueError("Occurrence counts require a classification and are positive only when detected")
         return self
 
 
@@ -229,6 +233,12 @@ class RiskResult(Model):
     findings: list[Finding]
     # 네트워크 엔진만 채웁니다. 이전에 저장된 결과에는 없으며, 그 경우 추측해서 만들지 않습니다.
     score_breakdown: NetworkScoreBreakdown | None = None
+    # 프롬프트 엔진의 문장별 반복 횟수 분석 상태(sentence-occurrence-v1). 점수·등급에는 쓰지 않습니다.
+    # None: 분석하지 않음(이전 기록·다른 엔진). error: 실패해서 횟수는 모두 None.
+    occurrence_status: Literal["ok", "error"] | None = None
+    occurrence_analysis_version: str | None = None
+    sentence_count: Count | None = None
+    occurrence_error_code: str | None = None
     created_at: AwareDatetime = Field(default_factory=now)
 
     @model_validator(mode="after")
@@ -242,6 +252,12 @@ class RiskResult(Model):
             raise ValueError("Complete results require complete findings")
         if self.score_breakdown is not None and (self.status != "complete" or self.score != self.score_breakdown.total_score):
             raise ValueError("Score breakdown must belong to a complete result with the same total")
+        counted = [f.occurrence_count is not None for f in self.findings]
+        if self.occurrence_status == "ok":
+            if self.engine != "data" or self.status != "complete" or not all(counted) or self.sentence_count is None:
+                raise ValueError("Occurrence counts require a complete prompt result with every finding counted")
+        elif any(counted) or self.sentence_count is not None:
+            raise ValueError("Occurrence counts are only stored when occurrence analysis succeeded")
         return self
 
 

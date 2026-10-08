@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEvent, eventLevel, nullableScore, fetchEventPage, levelFromScore, shouldNotify, formatScore, isNotable, viewStatus, isSummaryItem,
-  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE, sameSlotSummary, filterQuery, fetchUsers, fetchDates } from './events.js';
+  promptScoreRows, networkBreakdownParts, networkBreakdownText, SCOPE_NOTE, PROMPT_MAX_NOTE, sameSlotSummary, filterQuery, fetchUsers, fetchDates, occurrenceSummary, occurrenceCell } from './events.js';
 
 test('company windows show scope, provisional phase and maximum prompt provenance', () => {
   const row = normalizeEvent({ id: 'company-20261004T010000Z', scope: 'company', phase: 'open',
@@ -240,4 +240,19 @@ test('date and user filters are sent as query parameters only when set', async (
   ]);
   const dates = await fetchDates('', undefined, async () => ({ ok: true, json: async () => [{ date: '2026-10-01' }, { bad: 1 }] }));
   assert.deepEqual(dates, [{ date: '2026-10-01' }]);
+});
+
+test('occurrence summary: server counts only, null when not counted', () => {
+  assert.equal(occurrenceSummary({ prompt_occurrence_counts: null }), null);
+  const s = occurrenceSummary({
+    capture_count: 3, prompt_occurrence_capture_count: 2,
+    prompt_occurrence_counts: { AI_steal: 0, prompt_injection: 3, abuse_act: 1, token_waste_repeat: 0 },
+  });
+  assert.deepEqual(s.detected.map((i) => [i.label, i.count]), [['프롬프트 인젝션', 3], ['악용 행위', 1]]);
+  assert.equal(s.counted, 2);
+  assert.equal(s.total, 3);
+  assert.equal(occurrenceCell({ occurrence_status: 'error', occurrence_counts: null }), '집계 실패');
+  assert.equal(occurrenceCell({ status: 'complete' }), null);
+  assert.equal(occurrenceCell({ occurrence_status: 'ok', occurrence_counts: { AI_steal: 0 } }), '없음');
+  assert.equal(occurrenceCell({ occurrence_status: 'ok', occurrence_counts: { AI_steal: 2, abuse_act: 0 } }), 'AI 탈취 2');
 });

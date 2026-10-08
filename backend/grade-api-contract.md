@@ -1,5 +1,6 @@
 # 사용자·단말 5분 통합 등급 API 계약 (v0.8)
 
+> v0.8.2: 프롬프트 문장별 반복 횟수(참고 정보) 추가 — 아래 '반복 횟수' 절. 산식 변경 없음.
 > v0.8.1: 날짜(KST)·사용자 조회 추가 — `date` 필터, `/dashboard/users`, `/dashboard/dates`. 산식 변경 없음.
 > v0.8: 판정 단위를 **회사 전체 합산 5분 구간 → 사용자·단말별 5분 구간**으로 변경. 네트워크 모델이 사용자별 5분 창으로 학습됐기 때문입니다(학습 창 ID `..._user_001_w02`, 정상 창 요청 수 중앙값 4건). 회사 전체 기록을 한 창에 합치면 입력이 학습 분포를 벗어납니다. 산식·등급 기준·모델 파일은 그대로입니다.
 > v0.7: 구간 응답에 `prompt_scores`, `network_score_breakdown` 추가.
@@ -73,6 +74,21 @@
 ## 회사 시간대 요약 (`/dashboard/company-slots`)
 
 회사 점수를 새로 계산하지 않습니다. 같은 5분 시간대의 사용자 구간을 셉니다: `user_count`, `window_count`, `graded_window_count`, `pending_window_count`, `error_window_count`, `grade_counts`(normal/caution/warning/danger), `top_window_id/top_user_id/top_device_id/top_grade/top_score`(가장 높은 등급 → 같으면 높은 점수의 구간), `window_ids`(같은 순서). 미판정·오류 구간은 정상으로 세지 않습니다. 모델 폴더의 `risk_scoring.company_summary()`와 같은 "최악 창" 방식입니다.
+
+## 반복 횟수 (참고 정보, v0.8.2)
+
+프롬프트 엔진이 `analyze_with_occurrences()`를 제공하면 수집 시 문장별 반복 횟수(`sentence-occurrence-v1`)를 함께 저장합니다. **점수·등급·덮어쓰기 조건에는 반영하지 않습니다.**
+
+| 위치 | 필드 | 의미 |
+|---|---|---|
+| 프롬프트 결과(RiskResult, engine=data) | `occurrence_status` | `ok` / `error` / `null`(분석 안 함·이전 기록) |
+| | `sentence_count`, `occurrence_analysis_version`, `occurrence_error_code` | 문장 수, 집계 버전, 실패 코드 |
+| | `findings[].occurrence_count` | 라벨별 횟수(최초 탐지 포함). `ok`가 아니면 `null` |
+| 구간 `prompt_scores[]` | `occurrence_counts`, `occurrence_status` | 캡처별 횟수. 분석하지 않은 캡처에는 필드가 없음 |
+| 구간(RiskWindow·화면 응답) | `prompt_occurrence_counts` | `ok`인 프롬프트만 더한 라벨별 합계. 한 건도 없으면 `null` |
+| | `prompt_occurrence_capture_count` | 합계에 들어간 프롬프트 수(`capture_count`와 비교해 일부 집계 여부 확인) |
+
+문장 위치·문장별 확률 상세는 저장하지 않습니다. 실패한 집계는 0회로 바꾸지 않고 `null`로 둡니다.
 
 ## 갱신·기존 기록
 

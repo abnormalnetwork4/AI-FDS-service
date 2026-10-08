@@ -35,6 +35,7 @@ class WindowRepository:
         prompts = []
         scores = []  # 화면 공개용: 최고 점수 외의 프롬프트 결과도 함께 보여 줍니다.
         errors = missing = 0
+        occurrence_totals, occurrence_counted = {}, 0  # 참고용 반복 횟수 합계. 점수 계산에는 쓰지 않습니다.
         for member in members:
             assessment = json.loads(member["payload"])
             data = next((r for r in assessment["results"] if r["engine"] == "data"), None)
@@ -48,7 +49,19 @@ class WindowRepository:
                 # 분석 대기·원문 누락·과거 100점 척도는 0점으로 바꾸지 않고 미판정으로 둡니다.
                 missing += 1
                 status, score = "pending", None
-            scores.append(dict(capture_id=assessment["id"], user_id=assessment["user_id"], score=score, status=status))
+            counts, occ_status = None, None
+            if status == "complete" and data.get("occurrence_status") == "ok":
+                counts = {f["code"]: f["occurrence_count"] for f in data["findings"]}
+                occ_status = "ok"
+                occurrence_counted += 1
+                for code, n in counts.items():
+                    occurrence_totals[code] = occurrence_totals.get(code, 0) + n
+            elif status == "complete" and data.get("occurrence_status") == "error":
+                occ_status = "error"
+            entry = dict(capture_id=assessment["id"], user_id=assessment["user_id"], score=score, status=status)
+            if occ_status:  # 횟수 분석을 한 결과만 필드를 붙입니다(이전 기록 형식 유지).
+                entry.update(occurrence_counts=counts, occurrence_status=occ_status)
+            scores.append(entry)
         # tie: stable capture ID order; maximum is never a sum or mean.
         winner = max(prompts, key=lambda p: p[2]["score"], default=None)
         network = next((r for r in group["results"] if r["engine"] == "network"), None)
@@ -69,6 +82,8 @@ class WindowRepository:
                      network_score=network.get("score") if network else None,
                      network_contribution=round(network["score"] * .4, 2) if network and network.get("score") is not None else None,
                      prompt_scores=scores,
+                     prompt_occurrence_counts=occurrence_totals if occurrence_counted else None,
+                     prompt_occurrence_capture_count=occurrence_counted,
                      network_score_breakdown=network.get("score_breakdown") if network else None,
                      results=([winner[2]] if winner else []) + ([network] if network else []))
         if group["fusion_status"] == "complete":

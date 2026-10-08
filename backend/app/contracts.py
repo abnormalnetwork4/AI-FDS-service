@@ -134,6 +134,9 @@ class PromptScore(Model):
     # complete일 때만 점수가 있습니다. pending(누락·미분석)·error는 0점이 아니라 None입니다.
     score: float | None = None
     status: Literal["pending", "complete", "error"]
+    # 문장별 반복 횟수(라벨별). 횟수 분석을 하지 않았거나 실패한 결과는 0이 아니라 None입니다.
+    occurrence_counts: dict[str, Count] | None = None
+    occurrence_status: Literal["ok", "error"] | None = None
 
 
 class WindowResult(Model):
@@ -154,6 +157,10 @@ class WindowResult(Model):
     prompt_source_user_id: str | None = None
     # 구간 안 모든 프롬프트 결과(capture_id 오름차순). 통합 점수에는 이 중 최고 점수 한 건만 반영합니다.
     prompt_scores: list[PromptScore] = Field(default_factory=list)
+    # 반복 횟수 합계(참고 정보, 점수·등급에 반영하지 않음). 횟수 분석이 끝난 프롬프트만 더하며,
+    # 몇 건을 더했는지 prompt_occurrence_capture_count로 함께 공개합니다. 한 건도 없으면 None.
+    prompt_occurrence_counts: dict[str, Count] | None = None
+    prompt_occurrence_capture_count: int = 0
     network_score: float | None = None
     network_contribution: float | None = None
     # 최신 네트워크 결과의 점수 구성. 모델 보고서에 근거가 없던 과거 결과는 None입니다.

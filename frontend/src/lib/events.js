@@ -170,8 +170,42 @@ export function promptScoreRows(event) {
       captureId: String(p?.capture_id ?? '-'), userId: String(p?.user_id ?? '-'), status,
       score: status === 'complete' && finite(p.score) ? p.score : null,
       isMax: status === 'complete' && p.capture_id === event.prompt_source_capture_id,
+      occurrence: occurrenceCell(p),
     };
   });
+}
+
+// 프롬프트 위험 라벨 이름(문장별 반복 횟수 표시용).
+export const OCCURRENCE_LABELS = {
+  AI_steal: 'AI 탈취', prompt_injection: '프롬프트 인젝션', abuse_act: '악용 행위', token_waste_repeat: '토큰 낭비·반복',
+};
+
+const countOf = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
+
+// 문장별 반복 횟수 요약(참고 정보, 점수·등급에 반영하지 않음).
+// 서버가 집계하지 않은 구간(이전 기록·실패)은 null을 돌려 화면에서 숨기며, 0회로 꾸미지 않습니다.
+export function occurrenceSummary(event) {
+  const counts = event?.prompt_occurrence_counts;
+  if (!counts || typeof counts !== 'object') return null;
+  const items = Object.entries(counts)
+    .map(([code, n]) => ({ code, label: OCCURRENCE_LABELS[code] ?? code, count: countOf(n) }))
+    .filter((i) => i.count != null);
+  return {
+    items,
+    detected: items.filter((i) => i.count > 0).sort((a, b) => b.count - a.count),
+    counted: countOf(event.prompt_occurrence_capture_count) ?? 0,
+    total: countOf(event.capture_count) ?? 0,
+  };
+}
+
+// 캡처 한 건의 반복 횟수 문구. 분석 안 함 → null, 실패 → '집계 실패', 탐지 없음 → '없음'.
+export function occurrenceCell(p) {
+  if (p?.occurrence_status === 'error') return '집계 실패';
+  if (p?.occurrence_status !== 'ok' || !p.occurrence_counts) return null;
+  const parts = Object.entries(p.occurrence_counts)
+    .filter(([, n]) => countOf(n) > 0)
+    .map(([code, n]) => `${OCCURRENCE_LABELS[code] ?? code} ${n}`);
+  return parts.length ? parts.join(', ') : '없음';
 }
 
 // 네트워크 점수 구성. 서버(모델 보고서)가 준 값만 쓰고, 없는 항목은 null로 남겨 '미제공'으로 표시합니다.

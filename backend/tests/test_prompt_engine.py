@@ -142,7 +142,8 @@ def test_regression_exact_cutoff_and_invalid_probability(regression, monkeypatch
     assert [f.detected for f in result.findings] == [False, True, False, True]
     for invalid in [float("nan"), float("inf"), -0.1, 1.1]:
         monkeypatch.setitem(regression.classifiers, LABELS[0], Fixed(invalid))
-        with pytest.raises(ValidationError):
+        # 문장 집계용 일괄 예측에서 먼저 ValueError로 거절합니다. ValidationError도 ValueError의 하위 형식입니다.
+        with pytest.raises(ValueError):
             regression.analyze(request)
 
 

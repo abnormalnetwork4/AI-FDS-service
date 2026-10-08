@@ -193,8 +193,9 @@ def test_existing_analyze_remains_compatible_without_implicit_sentence_analysis(
     old = engine.analyze(DataRiskRequest(user_id="user-1", text="INJECTION. INJECTION."))
     assert type(old) is RiskResult
     assert len(engine.vectorizer.calls) == 1
-    assert "occurrence_status" not in old.model_dump()
-    assert all("occurrence_count" not in finding.model_dump() for finding in old.findings)
+    # 백엔드 연결 후 공통 RiskResult에 선택 필드가 생겼지만, analyze()는 문장 분석을 하지 않으므로 모두 None입니다.
+    assert old.occurrence_status is None and old.sentence_count is None
+    assert all(finding.occurrence_count is None for finding in old.findings)
     restored = RiskResult.model_validate_json(old.model_dump_json())
     assert restored.score == 34 and restored.findings[1].detected
 
