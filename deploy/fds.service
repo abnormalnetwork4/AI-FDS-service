@@ -1,0 +1,15 @@
+[Unit]
+Description=AI-FDS 분석 서버 (out-of-path, 포트 8000)
+After=network.target
+
+[Service]
+User=__APP_USER__
+WorkingDirectory=__APP_DIR__/backend
+# 운영 서버에서는 화면의 '기록 비우기'를 끕니다.
+Environment=FDS_ALLOW_CLEAR=0
+ExecStart=__APP_DIR__/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

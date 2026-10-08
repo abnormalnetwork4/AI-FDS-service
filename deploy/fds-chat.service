@@ -1,0 +1,14 @@
+[Unit]
+Description=recevie 사내 AI 채팅 서버 (포트 8100, FDS에 관측 기록)
+After=network.target fds.service
+
+[Service]
+User=__APP_USER__
+WorkingDirectory=__APP_DIR__/backend
+# 키·모델·주소는 backend/.env에서 읽습니다.
+ExecStart=__APP_DIR__/backend/.venv/bin/python -m uvicorn app.chat_main:app --host 127.0.0.1 --port 8100
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
