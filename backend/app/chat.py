@@ -65,6 +65,10 @@ class ClaudeClient:
         return bool(self.api_key)
 
     def reply(self, messages):
+        return self.call(messages)[0]
+
+    def call(self, messages):
+        """답변과 실제 송수신 바이트(요청 본문, 응답 본문)를 함께 돌려줍니다. FDS 관측값으로 씁니다."""
         body = json.dumps({
             "model": self.model, "max_tokens": self.max_tokens, "system": self.system,
             "messages": [{"role": m.role, "content": m.text} for m in messages],
@@ -76,11 +80,12 @@ class ClaudeClient:
             # 기본 'Python-urllib' User-Agent는 Cloudflare 등 방화벽이 봇으로 보고 403으로 막는 경우가 많습니다.
             "user-agent": "recevie-chat/0.1 (+AI-FDS-service)"})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            data = json.loads(response.read())
+            raw = response.read()
+        data = json.loads(raw)
         text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
         if not text:
             raise ValueError("Empty model response")
-        return text
+        return text, len(body), len(raw)
 
 
 def safe_error_detail(error, api_key):
@@ -130,16 +135,35 @@ class FdsClient:
             return response.status
 
 
-def record_prompt(fds, body: ChatRequest, prompt):
-    """프롬프트를 FDS 관측 한 건으로 보냅니다. 실패해도 채팅은 계속합니다(FDS는 원본 통신을 막지 않음)."""
+# 사내 채팅은 회사가 승인한 AI 서비스입니다. FDS에는 사용자가 실제로 접속한 회사 채팅 게이트웨이를 목적지로 보고합니다.
+CHAT_DESTINATION = "ai-gateway.corp.internal"
+# 채팅 서버는 패킷을 캡처하지 않으므로 패킷 수는 바이트로부터 추정합니다.
+# 비율은 네트워크 모델 학습 데이터(model/network/artifacts/test_features.csv) 정상 구간의 중앙값입니다:
+# 업로드 약 1,400바이트/패킷, 다운로드 약 250바이트/패킷(응답 스트리밍으로 작은 패킷이 많음).
+UP_BYTES_PER_PACKET = 1400
+DOWN_BYTES_PER_PACKET = 250
+
+
+def estimated_packets(size, per_packet):
+    return -(-size // per_packet) if size else 0
+
+
+def record_prompt(fds, body: ChatRequest, prompt, started, finished, sent, received):
+    """프롬프트를 FDS 관측 한 건으로 보냅니다. 실패해도 채팅은 계속합니다(FDS는 원본 통신을 막지 않음).
+
+    송수신 바이트·시각은 채팅 서버가 실제로 잰 값입니다. 패킷 수는 패킷 캡처가 없어 학습 데이터 비율로 추정합니다(아래 상수).
+    """
     capture_id = f"chat-{uuid4()}"
-    size = len(prompt.encode("utf-8"))
     try:
         event = EventIngest(
             id=capture_id, session_id=f"chat-{body.conversation_id}"[:128], user_id=body.user_id,
-            device_id=body.device_id, occurred_at=datetime.now(timezone.utc), destination="api.anthropic.com",
-            provider="anthropic", channel="web", bytes_sent=size, request_bytes=size,
-            process_name="recevie-web", prompt={"text": prompt, "input_origin": "direct_user"},
+            device_id=body.device_id, occurred_at=started, completed_at=finished,
+            destination=os.getenv("CHAT_FDS_DESTINATION", CHAT_DESTINATION), provider="anthropic", channel="web",
+            bytes_sent=sent, bytes_received=received, request_bytes=sent,
+            packets_sent=estimated_packets(sent, UP_BYTES_PER_PACKET),
+            packets_received=estimated_packets(received, DOWN_BYTES_PER_PACKET),
+            tenant=os.getenv("CHAT_FDS_TENANT", "corp"), process_name="recevie-web",
+            prompt={"text": prompt, "input_origin": "direct_user"},
         )
         fds.send(event)
         return capture_id, True
@@ -148,23 +172,42 @@ def record_prompt(fds, body: ChatRequest, prompt):
         return capture_id, False
 
 
+def call_model(client, messages):
+    """(답변, 보낸 바이트, 받은 바이트). 테스트용 가짜 클라이언트처럼 call이 없으면 글자 크기로 셉니다."""
+    if callable(getattr(client, "call", None)):
+        return client.call(messages)
+    text = client.reply(messages)
+    sent = len(json.dumps([{"role": m.role, "content": m.text} for m in messages]).encode())
+    return text, sent, len(text.encode("utf-8"))
+
+
 def chat(fds, body: ChatRequest, client: ClaudeClient):
     last = body.messages[-1]
     if last.role != "user":
         raise ValueError("The last message must be from the user")
-    capture_id, recorded = record_prompt(fds, body, last.text)
+    started = datetime.now(timezone.utc)
+    prompt_size = len(last.text.encode("utf-8"))
+
+    def record(sent, received):
+        return record_prompt(fds, body, last.text, started, datetime.now(timezone.utc), sent, received)
+
     if not client.configured:
+        capture_id, recorded = record(prompt_size, 0)
         return ChatResponse(reply=None, status="not_configured", capture_id=capture_id, fds_recorded=recorded,
                             message="AI가 아직 연결되지 않았습니다. 채팅 서버의 backend/.env에 ANTHROPIC_API_KEY를 설정하세요.")
+    # AI 응답 뒤에 기록합니다(응답 크기·완료 시각 포함). 실패해도 프롬프트는 기록합니다.
     try:
-        text = client.reply(model_messages(body.messages))
+        text, sent, received = call_model(client, model_messages(body.messages))
     except urllib.error.HTTPError as error:
+        capture_id, recorded = record(prompt_size, 0)
         hint = {401: "API 키를 확인하세요.", 404: "CLAUDE_MODEL 이름을 확인하세요.", 429: "요청 한도를 초과했습니다. 잠시 후 다시 시도하세요."}
         hint[403] = "접근 거부: 키 권한·크레딧·허용 모델을 확인하세요."
         detail = safe_error_detail(error, getattr(client, "api_key", ""))
         return ChatResponse(reply=None, status="ai_error", capture_id=capture_id, fds_recorded=recorded, model=client.model,
                             message=f"AI 응답 실패 (HTTP {error.code}). {hint.get(error.code, '')} {detail}".strip())
     except Exception:
+        capture_id, recorded = record(prompt_size, 0)
         return ChatResponse(reply=None, status="ai_error", capture_id=capture_id, fds_recorded=recorded, model=client.model,
                             message="AI 응답 실패. 네트워크 연결을 확인하세요.")
+    capture_id, recorded = record(sent, received)
     return ChatResponse(reply=text, status="ok", capture_id=capture_id, fds_recorded=recorded, model=client.model)

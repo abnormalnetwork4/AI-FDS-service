@@ -132,3 +132,15 @@ def test_request_headers_and_403_detail(monkeypatch):
     data = chat.post("/chat-api/chat", json=body("hi")).json()
     assert seen["user-agent"].startswith("recevie-chat") and seen["authorization"] == "Bearer secret-k"
     assert "403" in data["message"] and "insufficient credits" in data["message"] and "secret-k" not in data["message"]
+
+
+def test_fds_event_carries_measured_traffic(tmp_path):
+    fds_app = create_app(tmp_path / "chat.db", data_engine=make_engine(), network_engine=Network(score=10))
+    with TestClient(fds_app) as fds:
+        bridge = FdsBridge(fds)
+        chat = TestClient(create_chat_app(claude=FakeClaude(), fds=bridge))
+        chat.post("/chat-api/chat", json=body("회의록 요약해줘"))
+        event = bridge.sent[0]
+        assert event.destination == "ai-gateway.corp.internal" and event.tenant == "corp"
+        assert event.bytes_sent > 0 and event.bytes_received > 0 and event.completed_at >= event.occurred_at
+        assert event.packets_sent == -(-event.bytes_sent // 1400) and event.packets_received == -(-event.bytes_received // 250)
