@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 from .contracts import EventIngest
 from .schemas import Identifier
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+# Anthropic 호환 중계 서비스(예: MonoGPT MonoRouter)도 쓸 수 있게 주소를 바꿀 수 있습니다. 끝에 /messages를 붙여 호출합니다.
+DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 DEFAULT_MODEL = "claude-sonnet-4-5"
 DEFAULT_SYSTEM = ("당신은 회사 내부 업무를 돕는 AI 어시스턴트입니다. 한국어로 간결하고 정확하게 답합니다. "
                   "이 대화는 회사 보안 정책에 따라 위험도 분석(FDS) 대상입니다.")
@@ -51,9 +52,10 @@ class ChatResponse(BaseModel):
 class ClaudeClient:
     """표준 라이브러리만으로 Messages API를 호출합니다. 테스트에서는 같은 메서드를 가진 가짜 객체로 바꿉니다."""
 
-    def __init__(self, api_key=None, model=None, max_tokens=None, system=None, timeout=60):
+    def __init__(self, api_key=None, model=None, max_tokens=None, system=None, timeout=60, base_url=None):
         self.api_key = api_key if api_key is not None else os.getenv("ANTHROPIC_API_KEY", "").strip()
         self.model = model or os.getenv("CLAUDE_MODEL", DEFAULT_MODEL)
+        self.base_url = (base_url or os.getenv("ANTHROPIC_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
         self.max_tokens = int(max_tokens or os.getenv("CLAUDE_MAX_TOKENS", "1024"))
         self.system = system or os.getenv("CHAT_SYSTEM_PROMPT", DEFAULT_SYSTEM)
         self.timeout = timeout
@@ -67,7 +69,7 @@ class ClaudeClient:
             "model": self.model, "max_tokens": self.max_tokens, "system": self.system,
             "messages": [{"role": m.role, "content": m.text} for m in messages],
         }).encode()
-        request = urllib.request.Request(ANTHROPIC_URL, data=body, method="POST", headers={
+        request = urllib.request.Request(self.base_url + "/messages", data=body, method="POST", headers={
             "content-type": "application/json", "x-api-key": self.api_key, "anthropic-version": "2023-06-01"})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             data = json.loads(response.read())

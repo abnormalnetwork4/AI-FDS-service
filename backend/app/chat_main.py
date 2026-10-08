@@ -31,6 +31,7 @@ def create_chat_app(claude=None, fds=None) -> FastAPI:
     @app.get("/chat-api/health")
     def health():
         return {"status": "ok", "ai_configured": app.state.claude.configured, "model": app.state.claude.model,
+                "ai_base_url": getattr(app.state.claude, "base_url", None),
                 "fds_base_url": getattr(app.state.fds, "base_url", None)}
 
     @app.post("/chat-api/chat", response_model=ChatResponse)

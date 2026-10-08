@@ -171,6 +171,7 @@ API: `GET /api/v1/admin/clear/preview[?date=&user_id=]`(삭제 대상 수), `POS
 
 - FDS는 위험해도 대화를 **막지 않습니다**. 위험도는 대시보드에서 사용자별 5분 구간으로 확인합니다. FDS가 꺼져 있어도 채팅은 동작합니다(`fds_recorded=false`).
 - API 키는 채팅 서버에만 둡니다. `backend/.env.example`을 `backend/.env`로 복사하고 `ANTHROPIC_API_KEY`를 채우세요(`.env`는 깃에 올라가지 않음). 키가 없으면 "AI 미연결" 안내만 보이고 FDS 기록은 그대로 보냅니다.
+- Anthropic 호환 중계(MonoGPT MonoRouter 등)를 쓰려면 `ANTHROPIC_BASE_URL`을 그 주소로 바꿉니다(예: `https://monogpt.kr/api/monorouter/v1/anthropic/v1`, 모델 `claude-sonnet-4-6`).
 - 모델은 `CLAUDE_MODEL`(기본 `claude-sonnet-4-5`), 답변 길이는 `CLAUDE_MAX_TOKENS`, FDS 주소는 `FDS_BASE_URL`(기본 `http://127.0.0.1:8000`). 최근 20개 메시지만 모델에 보냅니다.
 - 사용자 ID는 시연용으로 채팅 왼쪽 아래를 누르거나 `chat.html?user=user-07`로 지정합니다(로그인 연동 전).
 

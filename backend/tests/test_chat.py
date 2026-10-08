@@ -82,3 +82,24 @@ def test_last_message_must_be_user_and_history_is_normalized():
     assert chat.post("/chat-api/chat", json=body("a", "b")).status_code == 422
     msgs = [ChatMessage(role="assistant", text="x"), ChatMessage(role="user", text="a"), ChatMessage(role="user", text="b")]
     assert [(m.role, m.text) for m in model_messages(msgs)] == [("user", "a\n\nb")]
+
+
+def test_base_url_is_configurable(monkeypatch):
+    from app import chat as chat_module
+    captured = {}
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"content":[{"type":"text","text":"hi"}]}'
+
+    def fake_open(request, timeout):
+        captured["url"], captured["key"] = request.full_url, request.get_header("X-api-key")
+        return Resp()
+
+    monkeypatch.setattr(chat_module.urllib.request, "urlopen", fake_open)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://monogpt.kr/api/monorouter/v1/anthropic/v1/")
+    client = chat_module.ClaudeClient(api_key="k", model="claude-sonnet-4-6")
+    assert client.reply([ChatMessage(role="user", text="안녕")]) == "hi"
+    assert captured == {"url": "https://monogpt.kr/api/monorouter/v1/anthropic/v1/messages", "key": "k"}
