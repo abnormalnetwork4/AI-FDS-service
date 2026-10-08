@@ -185,6 +185,17 @@
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
     button.workspace { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line, #e3e8f0); cursor: pointer; }
     button.workspace:hover strong { text-decoration: underline; }
+    .message-body.md { white-space: normal; }
+    .message-body.md p { margin: 0 0 8px; }
+    .message-body.md h3, .message-body.md h4, .message-body.md h5, .message-body.md h6 { margin: 14px 0 6px; font-size: 14px; font-weight: 700; color: var(--ink, #1c2a44); }
+    .message-body.md h3 { font-size: 15px; }
+    .message-body.md ul, .message-body.md ol { margin: 4px 0 10px; padding-left: 20px; }
+    .message-body.md li { margin: 2px 0; }
+    .message-body.md hr { border: 0; border-top: 1px solid var(--line, #e7edf5); margin: 12px 0; }
+    .message-body.md code { font-family: ui-monospace, monospace; font-size: 12px; background: #f1f5fb; border-radius: 4px; padding: 1px 5px; }
+    .message-body.md pre { background: #f1f5fb; border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 6px 0 10px; }
+    .message-body.md pre code { background: none; padding: 0; }
+    .message-body.md a { color: #2563eb; }
   </style>
 </head>
 <body>
@@ -338,6 +349,37 @@
       });
     }
 
+    // 답변용 간단한 마크다운 표시. 원문을 먼저 HTML 이스케이프하므로 답변 속 태그·스크립트는 실행되지 않습니다.
+    function renderMarkdown(text) {
+      const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const inline = (t) => esc(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      const out = [];
+      let list = null, code = null;
+      const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+      for (const line of text.replace(/\r/g, '').split('\n')) {
+        if (code !== null) {
+          if (/^```/.test(line)) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; }
+          else code.push(line);
+          continue;
+        }
+        if (/^```/.test(line)) { closeList(); code = []; continue; }
+        let m;
+        if ((m = line.match(/^(#{1,4})\s+(.*)$/))) { closeList(); const n = Math.min(m[1].length + 2, 6); out.push(`<h${n}>${inline(m[2])}</h${n}>`); }
+        else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { closeList(); out.push('<hr>'); }
+        else if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) { if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul'; } out.push(`<li>${inline(m[1])}</li>`); }
+        else if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol'; } out.push(`<li>${inline(m[1])}</li>`); }
+        else if (!line.trim()) { closeList(); }
+        else { closeList(); out.push(`<p>${inline(line)}</p>`); }
+      }
+      if (code !== null) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+      closeList();
+      return out.join('');
+    }
+
     function appendMessage(message, detached = false) {
       const row = document.createElement('article');
       const avatar = document.createElement('div');
@@ -352,7 +394,12 @@
       author.className = 'message-author';
       author.textContent = message.role === 'user' ? '나' : 'recevie';
       body.className = 'message-body';
-      body.textContent = message.text;
+      if (message.role === 'assistant' && !message.note && !message.pending) {
+        body.classList.add('md');
+        body.innerHTML = renderMarkdown(message.text);
+      } else {
+        body.textContent = message.text;
+      }
       content.append(author, body);
       if (message.role !== 'user' && (message.note || message.pending)) {
         const label = document.createElement('span');

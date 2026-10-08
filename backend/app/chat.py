@@ -23,8 +23,8 @@ from .schemas import Identifier
 # Anthropic 호환 중계 서비스(예: MonoGPT MonoRouter)도 쓸 수 있게 주소를 바꿀 수 있습니다. 끝에 /messages를 붙여 호출합니다.
 DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 DEFAULT_MODEL = "claude-sonnet-4-5"
-DEFAULT_SYSTEM = ("당신은 회사 내부 업무를 돕는 AI 어시스턴트입니다. 한국어로 간결하고 정확하게 답합니다. "
-                  "이 대화는 회사 보안 정책에 따라 위험도 분석(FDS) 대상입니다.")
+# 말투만 정합니다. 주제를 제한하지 않습니다(감시·판정은 FDS가 사후에 하며, 대화를 막거나 거르지 않음).
+DEFAULT_SYSTEM = "당신은 회사 직원을 돕는 AI 어시스턴트입니다. 사용자의 언어로 간결하고 정확하게 답합니다."
 MAX_HISTORY = 20  # 최근 메시지만 모델에 보냅니다(토큰 비용 제한).
 
 
