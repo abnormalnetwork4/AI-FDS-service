@@ -1315,6 +1315,8 @@ export default function RiskDashboard() {
         .score-tile__sub { font-size: 11.5px; color: var(--text-dim); }
         .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; min-width: 0; }
         .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
+        .chat-link { font-size: 12px; font-weight: 600; color: #33429A; text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; white-space: nowrap; align-self: center; }
+        .chat-link:hover { background: var(--panel); }
         .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 12px; }
         .window-card__occurrence > span:first-child { color: var(--text-dim); }
         .window-card__occurrence b { font-weight: 600; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
@@ -1400,6 +1402,7 @@ export default function RiskDashboard() {
           </div>
         </div>
         <div className="dash-header__right">
+          <a className="chat-link" href="/chat.html" target="_blank" rel="noopener" title="사내 AI 채팅(recevie)을 새 탭에서 엽니다. 보낸 프롬프트가 이 대시보드에 기록됩니다.">사내 AI 채팅 ↗</a>
           <div className="header-stats">
             <div className="header-stats__row">
               <span style={{ color: LEVELS.danger.color }}>위험 {counts.danger}</span>

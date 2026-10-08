@@ -160,6 +160,28 @@ API: `GET /api/v1/admin/clear/preview[?date=&user_id=]`(삭제 대상 수), `POS
 
 가상 데이터이므로 실제 운영에서는 실제 수집 범위와 사용자 규모로 다시 검증해야 합니다.
 
+## 사내 AI 채팅 (recevie)
+
+사내 AI 채팅은 **FDS와 분리된 별도 서버**입니다. FDS는 out-of-path 원칙상 AI 요청을 전달하지 않기 때문에, 채팅 서버가 '회사 AI 서비스' 역할을 하고 FDS에는 관측 기록만 보냅니다.
+
+```
+브라우저(chat.html) → 채팅 서버 :8100 /chat-api/chat ─┬→ FDS :8000 /api/v1/ingest/events (프롬프트 관측 기록·분석)
+                                                    └→ Claude API (답변)
+```
+
+- FDS는 위험해도 대화를 **막지 않습니다**. 위험도는 대시보드에서 사용자별 5분 구간으로 확인합니다. FDS가 꺼져 있어도 채팅은 동작합니다(`fds_recorded=false`).
+- API 키는 채팅 서버에만 둡니다. `backend/.env.example`을 `backend/.env`로 복사하고 `ANTHROPIC_API_KEY`를 채우세요(`.env`는 깃에 올라가지 않음). 키가 없으면 "AI 미연결" 안내만 보이고 FDS 기록은 그대로 보냅니다.
+- 모델은 `CLAUDE_MODEL`(기본 `claude-sonnet-4-5`), 답변 길이는 `CLAUDE_MAX_TOKENS`, FDS 주소는 `FDS_BASE_URL`(기본 `http://127.0.0.1:8000`). 최근 20개 메시지만 모델에 보냅니다.
+- 사용자 ID는 시연용으로 채팅 왼쪽 아래를 누르거나 `chat.html?user=user-07`로 지정합니다(로그인 연동 전).
+
+실행 (FDS 서버와 별도 터미널, backend 폴더):
+
+```
+.\.venv\Scripts\python.exe -m uvicorn app.chat_main:app --host 127.0.0.1 --port 8100
+```
+
+화면: http://localhost:5173/chat.html (대시보드 오른쪽 위 "사내 AI 채팅" 버튼). 상태 확인: http://127.0.0.1:8100/chat-api/health
+
 ## 조회 API
 
 | Method | 경로 | 역할 |

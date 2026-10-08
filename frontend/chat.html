@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="업무를 위한 사내 AI 대화 화면 미리보기">
-  <title>recevie — 사내 AI 워크스페이스</title>
+  <title>recevie 사내 AI</title>
   <style>
     :root {
       --ink: #1c2b43; --muted: #738198; --accent: #2563eb; --accent-light: #edf4ff;
@@ -183,6 +183,8 @@
       .char-count { font-size: 8px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+    button.workspace { width: 100%; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-top: 1px solid var(--line, #e3e8f0); cursor: pointer; }
+    button.workspace:hover strong { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -214,12 +216,12 @@
         <ul class="history" id="history"></ul>
       </nav>
       <div class="sidebar-note"><svg aria-hidden="true"><use href="#i-bulb"/></svg><strong>작은 질문에서 시작해요.</strong><p>정리되지 않은 생각도 괜찮아요.<br>대화하며 하나씩 구체화해 보세요.</p></div>
-      <div class="workspace"><div class="workspace-avatar" aria-hidden="true">W</div><div><strong>사내 워크스페이스</strong><small>YOUR PERSONAL SPACE</small></div></div>
+      <button class="workspace" id="user-switch" type="button" title="사용자 ID 바꾸기 (시연용)"><div class="workspace-avatar" aria-hidden="true">W</div><div><strong id="user-label">사내 워크스페이스</strong><small id="device-label">YOUR PERSONAL SPACE</small></div></button>
     </aside>
     <main class="main">
       <header class="topbar">
         <div class="topbar-left"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="대화 목록 열기" aria-controls="sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-menu"/></svg></button><div><p class="topbar-title">사내 AI 어시스턴트</p><p class="topbar-subtitle">아이디어에서 실행까지, 대화로 함께</p></div></div>
-        <div class="topbar-right"><span class="preview-badge">화면 미리보기</span><button class="icon-button" id="help-button" aria-label="사용 안내"><svg aria-hidden="true"><use href="#i-info"/></svg></button></div>
+        <div class="topbar-right"><span class="preview-badge" id="ai-status" title="보낸 프롬프트는 회사 보안 정책에 따라 위험도 분석(FDS)에 기록됩니다.">FDS 모니터링</span><button class="icon-button" id="help-button" aria-label="사용 안내"><svg aria-hidden="true"><use href="#i-info"/></svg></button></div>
       </header>
       <div class="scroll-area" id="scroll-area">
         <section class="welcome" id="welcome" aria-labelledby="welcome-title">
@@ -247,17 +249,30 @@
             <div class="send-area"><span class="char-count" id="char-count" aria-live="off" hidden></span><button class="icon-button" id="clear-input" type="button" aria-label="입력 내용 지우기" hidden><svg aria-hidden="true"><use href="#i-close"/></svg></button><button class="send-button" id="send-button" type="submit" aria-label="메시지 전송" disabled><svg aria-hidden="true"><use href="#i-up"/></svg></button></div>
           </div>
         </form>
-        <div class="composer-footer"><span id="composer-note"><svg aria-hidden="true"><use href="#i-info"/></svg>화면 시연용 · 실제 AI 응답은 연결 후 제공돼요.</span><span class="keyboard-hint"><kbd class="key">Enter</kbd> 전송 <span aria-hidden="true">·</span> <kbd class="key">Shift + Enter</kbd> 줄바꿈</span></div>
+        <div class="composer-footer"><span id="composer-note"><svg aria-hidden="true"><use href="#i-info"/></svg>이 대화는 회사 보안 정책에 따라 위험도 분석(FDS)에 기록돼요.</span><span class="keyboard-hint"><kbd class="key">Enter</kbd> 전송 <span aria-hidden="true">·</span> <kbd class="key">Shift + Enter</kbd> 줄바꿈</span></div>
       </section>
     </main>
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">recevie 사용 안내</h2><button class="icon-button" id="close-help" aria-label="사용 안내 닫기" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <p>하고 싶은 일을 입력하고 전송 버튼을 눌러 보세요. 질문 예시 카드를 누르면 시작하기 좋은 문장이 준비돼요.</p>
-    <div class="dialog-tips"><p>Enter로 전송하고, Shift + Enter로 줄을 바꿀 수 있어요. ‘새로운 대화’로 다른 주제의 대화를 시작할 수 있어요.</p><p>현재는 화면 미리보기예요. 입력 내용은 외부로 전송되지 않으며, 대화 목록은 이 페이지를 열어 둔 동안만 유지돼요.</p></div>
+    <div class="dialog-tips"><p>Enter로 전송하고, Shift + Enter로 줄을 바꿀 수 있어요. ‘새로운 대화’로 다른 주제의 대화를 시작할 수 있어요.</p><p>답변은 회사 채팅 서버를 거쳐 Claude가 생성해요. 보낸 프롬프트는 보안 정책에 따라 위험도 분석(FDS)에 기록되지만 대화를 막지는 않아요. 대화 목록은 이 페이지를 열어 둔 동안만 유지돼요.</p><p>사용자 ID는 왼쪽 아래를 눌러 바꿀 수 있어요(시연용). 주소 뒤에 <code>?user=user-01</code>을 붙여도 돼요.</p></div>
   </dialog>
   <script>
-    // Standalone UI preview. No API calls, credentials, or persistent prompt storage.
+    // 사내 AI 채팅. 프롬프트는 백엔드 /api/v1/chat으로 보내고, 서버가 FDS 기록 후 Claude 답변을 돌려줍니다.
+    // API 키는 서버에만 있습니다. 대화 내용은 브라우저 저장소에 남기지 않습니다(사용자·단말 ID만 저장).
+    const API_BASE = (new URLSearchParams(location.search).get('api') || '').replace(/\/$/, '');
+    const ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,64}$/;
+    const store = {
+      get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+      set(key, value) { try { localStorage.setItem(key, value); } catch { /* 저장 불가 환경 */ } },
+    };
+    const randomId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    let userId = new URLSearchParams(location.search).get('user') || store.get('recevie-user') || 'user-01';
+    if (!ID_PATTERN.test(userId)) userId = 'user-01';
+    let deviceId = store.get('recevie-device');
+    if (!deviceId || !ID_PATTERN.test(deviceId)) { deviceId = 'web-' + randomId(); store.set('recevie-device', deviceId); }
+    let sending = false;
     const $ = (id) => document.getElementById(id);
     const app = $('app');
     const input = $('prompt-input');
@@ -291,7 +306,7 @@
     function updateInput() {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 180) + 'px';
-      $('send-button').disabled = !input.value.trim();
+      $('send-button').disabled = sending || !input.value.trim();
       $('clear-input').hidden = !input.value;
       $('char-count').hidden = input.value.length < 1000;
       $('char-count').textContent = input.value.length.toLocaleString() + ' / 8,000';
@@ -323,7 +338,7 @@
       });
     }
 
-    function appendMessage(message) {
+    function appendMessage(message, detached = false) {
       const row = document.createElement('article');
       const avatar = document.createElement('div');
       const content = document.createElement('div');
@@ -339,14 +354,15 @@
       body.className = 'message-body';
       body.textContent = message.text;
       content.append(author, body);
-      if (message.role !== 'user') {
+      if (message.role !== 'user' && (message.note || message.pending)) {
         const label = document.createElement('span');
         label.className = 'demo-label';
-        label.append(icon('info'), document.createTextNode('화면 시연 메시지'));
+        label.append(icon('info'), document.createTextNode(message.pending ? '답변 대기 중' : '안내 메시지'));
         content.append(label);
       }
       row.append(avatar, content);
-      messages.append(row);
+      if (!detached) messages.append(row);
+      return row;
     }
 
     function renderConversation() {
@@ -392,30 +408,63 @@
       input.focus();
     }
 
-    $('prompt-form').addEventListener('submit', (event) => {
+    $('prompt-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const prompt = input.value.trim();
-      if (!prompt) return;
+      if (!prompt || sending) return;
       let conversation = conversations.find((item) => item.id === activeId);
       if (!conversation) {
-        conversation = { id: nextId++, title: prompt.split('\n')[0].slice(0, 42), messages: [] };
+        conversation = { id: nextId++, key: 'conv-' + randomId(), title: prompt.split('\n')[0].slice(0, 42), messages: [] };
         conversations.push(conversation);
         drafts.delete(null);
         activeId = conversation.id;
       }
       const userMessage = { role: 'user', text: prompt };
-      const previewMessage = { role: 'assistant', text: '프롬프트가 대화창에 추가됐어요.\n실제 AI를 연결하면 이 자리에 답변이 표시돼요. 지금은 입력과 대화 화면을 확인하는 미리보기예요.' };
-      conversation.messages.push(userMessage, previewMessage);
+      const reply = { role: 'assistant', text: '답변을 작성하고 있어요…', pending: true };
+      conversation.messages.push(userMessage);
+      const history = conversation.messages.filter((m) => !m.note).map((m) => ({ role: m.role, text: m.text }));
+      conversation.messages.push(reply);
       welcome.hidden = true;
       messages.hidden = false;
       appendMessage(userMessage);
-      appendMessage(previewMessage);
+      const replyNode = appendMessage(reply);
       renderHistory();
       input.value = '';
+      sending = true;
       updateInput();
       input.focus();
       requestAnimationFrame(() => { scrollArea.scrollTop = scrollArea.scrollHeight; });
+      try {
+        const response = await fetch(`${API_BASE}/chat-api/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, device_id: deviceId, conversation_id: conversation.key, messages: history }),
+        });
+        if (!response.ok) throw new Error(`서버 오류 (HTTP ${response.status})`);
+        const data = await response.json();
+        if (data.status === 'ok') { reply.text = data.reply; }
+        else { reply.text = data.message || 'AI 답변을 받지 못했어요.'; reply.note = true; }
+      } catch (error) {
+        reply.text = `서버에 연결하지 못했어요. 채팅 서버(포트 8100)가 켜져 있는지 확인해 주세요. ${error.message || ''}`.trim();
+        reply.note = true;
+      }
+      reply.pending = false;
+      sending = false;
+      updateInput();
+      if (activeId === conversation.id && replyNode.isConnected) {
+        replyNode.replaceWith(appendMessage(reply, true));
+      }
+      requestAnimationFrame(() => { scrollArea.scrollTop = scrollArea.scrollHeight; });
     });
+
+    function showUser() {
+      $('user-label').textContent = userId;
+      $('device-label').textContent = deviceId;
+    }
+    $('user-switch').addEventListener('click', () => {
+      const next = window.prompt('사용자 ID (영문·숫자·-_.:@, 시연용)', userId);
+      if (next && ID_PATTERN.test(next.trim())) { userId = next.trim(); store.set('recevie-user', userId); showUser(); }
+    });
+    showUser();
 
     input.addEventListener('input', updateInput);
     input.addEventListener('keydown', (event) => {
