@@ -144,3 +144,20 @@ def test_fds_event_carries_measured_traffic(tmp_path):
         assert event.destination == "ai-gateway.corp.internal" and event.tenant == "corp"
         assert event.bytes_sent > 0 and event.bytes_received > 0 and event.completed_at >= event.occurred_at
         assert event.packets_sent == -(-event.bytes_sent // 1400) and event.packets_received == -(-event.bytes_received // 250)
+
+
+def test_health_and_401_hint_when_relay_key_hits_official_api(monkeypatch):
+    import io
+    from app import chat as chat_module
+
+    def fake_open(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {},
+                                     io.BytesIO(b'{"error":{"message":"invalid x-api-key"}}'))
+
+    monkeypatch.setattr(chat_module.urllib.request, "urlopen", fake_open)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    claude = chat_module.ClaudeClient(api_key="mono-abc", model="m", base_url="https://api.anthropic.com/v1")
+    chat = TestClient(create_chat_app(claude=claude, fds=FdsBridge(down=True)))
+    assert "ANTHROPIC_BASE_URL" in chat.get("/chat-api/health").json()["warning"]
+    msg = chat.post("/chat-api/chat", json=body("hi")).json()["message"]
+    assert "monogpt.kr" in msg and "mono-abc" not in msg

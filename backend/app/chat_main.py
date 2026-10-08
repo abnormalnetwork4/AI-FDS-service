@@ -35,7 +35,14 @@ def create_chat_app(claude=None, fds=None) -> FastAPI:
 
     @app.get("/chat-api/health")
     def health():
-        return {"status": "ok", "ai_configured": app.state.claude.configured, "model": app.state.claude.model,
+        claude = app.state.claude
+        key, base = getattr(claude, "api_key", ""), getattr(claude, "base_url", "")
+        warning = None
+        if not claude.configured:
+            warning = "ANTHROPIC_API_KEY가 비어 있습니다."
+        elif "api.anthropic.com" in base and not key.startswith("sk-ant-"):
+            warning = "공식 Anthropic 주소인데 키가 sk-ant-로 시작하지 않습니다. MonoGPT 키라면 ANTHROPIC_BASE_URL을 설정하세요."
+        return {"status": "ok", "ai_configured": claude.configured, "model": claude.model, "warning": warning,
                 "ai_base_url": getattr(app.state.claude, "base_url", None),
                 "fds_base_url": getattr(app.state.fds, "base_url", None)}
 

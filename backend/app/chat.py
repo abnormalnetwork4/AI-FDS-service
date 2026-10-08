@@ -202,6 +202,10 @@ def chat(fds, body: ChatRequest, client: ClaudeClient):
         capture_id, recorded = record(prompt_size, 0)
         hint = {401: "API 키를 확인하세요.", 404: "CLAUDE_MODEL 이름을 확인하세요.", 429: "요청 한도를 초과했습니다. 잠시 후 다시 시도하세요."}
         hint[403] = "접근 거부: 키 권한·크레딧·허용 모델을 확인하세요."
+        if error.code == 401 and "api.anthropic.com" in getattr(client, "base_url", "") \
+                and not getattr(client, "api_key", "").startswith("sk-ant-"):
+            hint[401] = ("Anthropic 공식 주소로 다른 서비스 키를 보냈습니다. MonoGPT 키라면 .env에 "
+                         "ANTHROPIC_BASE_URL=https://monogpt.kr/api/monorouter/v1/anthropic/v1 을 넣고 채팅 서버를 재시작하세요.")
         detail = safe_error_detail(error, getattr(client, "api_key", ""))
         return ChatResponse(reply=None, status="ai_error", capture_id=capture_id, fds_recorded=recorded, model=client.model,
                             message=f"AI 응답 실패 (HTTP {error.code}). {hint.get(error.code, '')} {detail}".strip())
