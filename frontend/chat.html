@@ -508,8 +508,19 @@
       $('device-label').textContent = deviceId;
     }
     $('user-switch').addEventListener('click', () => {
-      const next = window.prompt('사용자 ID (영문·숫자·-_.:@, 시연용)', userId);
-      if (next && ID_PATTERN.test(next.trim())) { userId = next.trim(); store.set('recevie-user', userId); showUser(); }
+      const raw = window.prompt('사용자 ID를 입력하세요 (영문·숫자·- _ . : @, 64자 이내 · 시연용)', userId);
+      if (raw == null) return;  // 취소
+      const next = raw.trim().replace(/\s+/g, '-');  // 공백은 -로 바꿉니다
+      if (!ID_PATTERN.test(next)) {
+        window.alert('사용할 수 없는 ID예요. 한글·공백·특수문자 없이 영문·숫자와 - _ . : @ 만 써 주세요.\n예: isaac, user-07');
+        return;
+      }
+      userId = next;
+      store.set('recevie-user', userId);
+      // 주소에 ?user=가 있으면 새로고침해도 바꾼 ID가 유지되도록 주소도 바꿉니다.
+      const url = new URL(location.href);
+      if (url.searchParams.has('user')) { url.searchParams.set('user', userId); window.history.replaceState(null, '', url); }
+      showUser();
     });
     showUser();
 
