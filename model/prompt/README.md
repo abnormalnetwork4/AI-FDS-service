@@ -29,6 +29,37 @@
 
 기본 모드는 `PROMPT_ENGINE=regression`입니다. `PROMPT_MODEL_DIR`를 지정하면 이 형식의 폴더여야 합니다. 모델 누락이나 형식·해시·scikit-learn 버전 불일치는 시작 오류로 처리하며 다른 모델로 자동 전환하지 않습니다. 변경 전 서버는 재시작해야 새 모델을 사용합니다. 기존 DB 기록은 당시 모델 버전을 유지하고 새 요청부터 새 모델로 분석합니다.
 
+## 반복 횟수 집계 — 엔진 측 연결 인터페이스
+
+`backend/app/prompt_engine.py`의 `analyze_with_occurrences()`에 `Regression.ipynb`의 문장별 집계를 추가했습니다. 기존 `analyze()`는 기존 `RiskResult`만 반환합니다. API·공통 스키마·수집·저장 연결은 변경하지 않았으며, 백엔드에서 새 진입점을 명시적으로 연결해야 합니다. 기본 Regression과 이전 All_in_one 모두 같은 집계 계약을 사용합니다.
+
+```python
+result = engine.analyze_with_occurrences(
+    DataRiskRequest(user_id="user-1", text=prompt),
+    request_id=capture_id,
+)
+payload = result.model_dump(mode="json")
+```
+
+새 반환 형식은 엔진 전용 `PromptRiskResult`입니다. 기존 공통 `RiskResult`에 바로 넣는 대신, 백엔드에서 아래 선택 필드와 nullable 횟수를 응답·저장 형식에 반영해야 합니다.
+
+| 필드 | 의미 |
+|---|---|
+| `occurrence_status` | `ok` 또는 `error`. 횟수 분석 오류와 기존 전체 분류 상태는 별개입니다. |
+| `occurrence_analysis_version` | `sentence-occurrence-v1` |
+| `findings[].occurrence_count` | 최초 탐지를 포함한 해당 라벨의 총 횟수 |
+| `label_occurrence_counts` | 같은 횟수를 네 라벨의 사전으로 전달. 위 필드와 이중 합산하지 않습니다. |
+| `label_sentence_counts` | 전체 판정의 집계 허용 여부와 관계없이 문장에서 탐지된 라벨별 수 |
+| `sentence_count`, `sentence_detections` | 문장 수와 원문 위치·확률·탐지 여부·집계 여부. 원문 텍스트는 포함하지 않습니다. |
+| `occurrences` | 실제 집계 단위의 라벨·위치·출처·재처리 식별자 `event_id` |
+| `occurrence_error` | 분석 실패 또는 제한 초과의 고정 오류 코드·메시지 |
+
+전체 프롬프트에서 탐지된 라벨만 문장별 횟수에 반영합니다. 같은 문장이 다른 위치에서 반복되면 각각 셉니다. 전체에서만 탐지된 라벨은 1회로 유지하고 `source=whole_prompt_fallback`, `sentence_index=null`로 구분합니다. 기존 전체 판정·확률·점수는 횟수 때문에 바꾸지 않습니다.
+
+인용문·코드·URL·이메일·소수점·영문 약어의 내부 구두점을 보호하며, 원문 위치는 Python Unicode 코드 포인트 기준의 `[start, end)`입니다. JavaScript의 UTF-16 문자열 인덱스로 바로 사용하면 안 됩니다. 256문장 초과 또는 보조 분석 실패는 `occurrence_status=error`로 전달하며 횟수와 상세를 모두 `null`로 둡니다. 부분 집계나 0회로 대체하지 않습니다.
+
+`request_id`는 기존 식별자 형식을 따르는 전역 고유 요청 ID를 전달합니다. 같은 ID·원문·위치·라벨·출처로 재처리하면 같은 `event_id`가 나옵니다. 생략하면 매 분석 결과 ID를 사용하므로 별도 호출을 같은 요청으로 합치지 않습니다. 엔진은 요청 간 누적 상태나 영구 중복 제거를 수행하지 않으며, 수신 측에서 `event_id`로 재처리를 구별합니다.
+
 ## 이전 버전: All_in_one XGBoost
 
 `PROMPT_ENGINE=all-in-one`을 명시하면 아래 모델을 사용할 수 있습니다. 새 모델은 별도 폴더에 두어 기존 모델과 기록을 보존했습니다.

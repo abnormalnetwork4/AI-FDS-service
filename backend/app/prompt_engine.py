@@ -7,9 +7,14 @@ from importlib.metadata import version
 from pathlib import Path
 from threading import Lock
 
+from pydantic import TypeAdapter
+
 from .engines import DATA_CATEGORIES
-from .schemas import DataRiskRequest, Finding, RiskResult
+from .schemas import DataRiskRequest, Finding, Identifier, RiskResult
 from .scoring import PROMPT_POLICY, prompt_score
+from .prompt_occurrences import (
+    OCCURRENCE_ANALYSIS_VERSION, OccurrenceAnalysisLimitError, PromptRiskResult, analyze_sentence_occurrences,
+)
 
 LABELS = tuple(DATA_CATEGORIES)
 DESCRIPTIONS = {
@@ -68,14 +73,26 @@ class AllInOneDataRiskEngine:
             self.classifiers[label] = classifier
         self._lock = Lock()
 
-    def analyze(self, request: DataRiskRequest) -> RiskResult:
+    def _predict_many(self, prompts):
         # 원본 normalize_prompt와 같은 처리입니다. 문맥이나 새 규칙은 추가하지 않습니다.
-        text = unicodedata.normalize("NFKC", request.text).replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not text:
+        cleaned = [unicodedata.normalize("NFKC", text).replace("\r\n", "\n").replace("\r", "\n").strip()
+                   for text in prompts]
+        if not cleaned or any(not text for text in cleaned):
             raise ValueError("Prompt must not be blank")
         with self._lock:
-            features = self.vectorizer.transform([text])
-            probabilities = {label: float(self.classifiers[label].predict_proba(features)[0, 1]) for label in LABELS}
+            features = self.vectorizer.transform(cleaned)
+            matrices = {label: self.classifiers[label].predict_proba(features) for label in LABELS}
+        outputs = []
+        for index in range(len(cleaned)):
+            probabilities = {label: float(matrices[label][index, 1]) for label in LABELS}
+            if any(not math.isfinite(value) or not 0 <= value <= 1 for value in probabilities.values()):
+                raise ValueError("Prompt model returned invalid probabilities")
+            outputs.append(dict(probabilities=probabilities,
+                                risk_flags={label: probabilities[label] > self.thresholds[label] for label in LABELS}))
+        return tuple(outputs)
+
+    def analyze(self, request: DataRiskRequest) -> RiskResult:
+        probabilities = self._predict_many([request.text])[0]["probabilities"]
         findings = [Finding(
             code=label, name=DATA_CATEGORIES[label], status="complete",
             detected=probabilities[label] > self.thresholds[label],
@@ -86,6 +103,30 @@ class AllInOneDataRiskEngine:
         return RiskResult(user_id=request.user_id, engine="data", engine_version=self.model_version,
                           input_origin=request.input_origin, status="complete", findings=findings,
                           score=prompt_score(findings), score_max=60, scoring_policy=PROMPT_POLICY)
+
+    def analyze_with_occurrences(self, request: DataRiskRequest, *, request_id: str | None = None) -> PromptRiskResult:
+        """백엔드에서 명시적으로 연결할 반복 집계 진입점입니다. 기존 analyze 계약은 유지합니다."""
+        if request_id is not None:
+            request_id = TypeAdapter(Identifier).validate_python(request_id)
+        result = self.analyze(request)
+        payload = result.model_dump()
+        payload["source_event_id"] = request_id
+        try:
+            analysis = analyze_sentence_occurrences(
+                request.text, result.findings, self._predict_many, request_id or result.id,
+            )
+            counted_findings = [finding.model_dump() | {"occurrence_count": analysis["label_occurrence_counts"][finding.code]}
+                                for finding in result.findings]
+            return PromptRiskResult.model_validate(payload | analysis | {"findings": counted_findings})
+        except OccurrenceAnalysisLimitError:
+            error = {"code": "occurrence_limit_exceeded", "message": "문장 분석의 길이 또는 문장 수 제한을 초과함."}
+        except Exception:
+            # 보조 분석 오류는 기존 전체 판정·점수를 유지하며 원문·예외 상세를 노출하지 않습니다.
+            error = {"code": "occurrence_analysis_failed", "message": "반복 횟수 분석 실패. 0회 판정이 아님."}
+        return PromptRiskResult.model_validate(payload | {
+            "occurrence_status": "error", "occurrence_analysis_version": OCCURRENCE_ANALYSIS_VERSION,
+            "occurrence_error": error,
+        })
 
 
 class RegressionDataRiskEngine(AllInOneDataRiskEngine):
