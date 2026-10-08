@@ -13,12 +13,17 @@ from .chat import ChatRequest, ChatResponse, ClaudeClient, FdsClient, chat
 def load_env_file(path=Path(__file__).resolve().parents[1] / ".env"):
     if not path.is_file():
         return
+    values = {}
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = value.strip().strip('"').strip("'")
+        if key.strip() and value:  # 같은 키가 여러 번이면 마지막 값, 빈 값은 무시
+            values[key.strip()] = value
+    for key, value in values.items():
+        os.environ.setdefault(key, value)
 
 
 def create_chat_app(claude=None, fds=None) -> FastAPI:

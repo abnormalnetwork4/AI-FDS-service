@@ -103,3 +103,14 @@ def test_base_url_is_configurable(monkeypatch):
     client = chat_module.ClaudeClient(api_key="k", model="claude-sonnet-4-6")
     assert client.reply([ChatMessage(role="user", text="안녕")]) == "hi"
     assert captured == {"url": "https://monogpt.kr/api/monorouter/v1/anthropic/v1/messages", "key": "k"}
+
+
+def test_env_file_last_nonempty_value_wins(tmp_path, monkeypatch):
+    from app.chat_main import load_env_file
+    env = tmp_path / ".env"
+    env.write_text("ANTHROPIC_API_KEY=\r\nCLAUDE_MODEL=a\r\nANTHROPIC_API_KEY=real\r\nCLAUDE_MODEL=b\r\n", encoding="utf-8")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_MODEL", raising=False)
+    load_env_file(env)
+    import os
+    assert os.environ["ANTHROPIC_API_KEY"] == "real" and os.environ["CLAUDE_MODEL"] == "b"
