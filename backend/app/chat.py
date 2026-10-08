@@ -70,13 +70,35 @@ class ClaudeClient:
             "messages": [{"role": m.role, "content": m.text} for m in messages],
         }).encode()
         request = urllib.request.Request(self.base_url + "/messages", data=body, method="POST", headers={
-            "content-type": "application/json", "x-api-key": self.api_key, "anthropic-version": "2023-06-01"})
+            "content-type": "application/json", "anthropic-version": "2023-06-01",
+            # 공식 API는 x-api-key, 일부 중계(MonoGPT 등)는 Bearer를 씁니다. 둘 다 보내도 공식 API는 문제없습니다.
+            "x-api-key": self.api_key, "authorization": f"Bearer {self.api_key}",
+            # 기본 'Python-urllib' User-Agent는 Cloudflare 등 방화벽이 봇으로 보고 403으로 막는 경우가 많습니다.
+            "user-agent": "recevie-chat/0.1 (+AI-FDS-service)"})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             data = json.loads(response.read())
         text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
         if not text:
             raise ValueError("Empty model response")
         return text
+
+
+def safe_error_detail(error, api_key):
+    """중계 서버가 돌려준 오류 문구 앞부분만 보여 줍니다(원인 파악용). 키가 섞여 있으면 가립니다."""
+    try:
+        raw = error.read(400).decode("utf-8", "replace")
+    except Exception:
+        return ""
+    try:
+        data = json.loads(raw)
+        err = data.get("error", data)
+        raw = err.get("message") or err.get("type") or raw if isinstance(err, dict) else str(err)
+    except Exception:
+        pass
+    raw = " ".join(str(raw).split())[:160]
+    if api_key:
+        raw = raw.replace(api_key, "<KEY>")
+    return f"서버 응답: {raw}" if raw else ""
 
 
 def model_messages(messages):
@@ -138,8 +160,10 @@ def chat(fds, body: ChatRequest, client: ClaudeClient):
         text = client.reply(model_messages(body.messages))
     except urllib.error.HTTPError as error:
         hint = {401: "API 키를 확인하세요.", 404: "CLAUDE_MODEL 이름을 확인하세요.", 429: "요청 한도를 초과했습니다. 잠시 후 다시 시도하세요."}
+        hint[403] = "접근 거부: 키 권한·크레딧·허용 모델을 확인하세요."
+        detail = safe_error_detail(error, getattr(client, "api_key", ""))
         return ChatResponse(reply=None, status="ai_error", capture_id=capture_id, fds_recorded=recorded, model=client.model,
-                            message=f"AI 응답 실패 (HTTP {error.code}). {hint.get(error.code, '')}".strip())
+                            message=f"AI 응답 실패 (HTTP {error.code}). {hint.get(error.code, '')} {detail}".strip())
     except Exception:
         return ChatResponse(reply=None, status="ai_error", capture_id=capture_id, fds_recorded=recorded, model=client.model,
                             message="AI 응답 실패. 네트워크 연결을 확인하세요.")

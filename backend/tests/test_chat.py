@@ -114,3 +114,21 @@ def test_env_file_last_nonempty_value_wins(tmp_path, monkeypatch):
     load_env_file(env)
     import os
     assert os.environ["ANTHROPIC_API_KEY"] == "real" and os.environ["CLAUDE_MODEL"] == "b"
+
+
+def test_request_headers_and_403_detail(monkeypatch):
+    import io
+    from app import chat as chat_module
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen.update({k.lower(): v for k, v in request.header_items()})
+        raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {},
+                                     io.BytesIO(b'{"error":{"message":"insufficient credits for key secret-k"}}'))
+
+    monkeypatch.setattr(chat_module.urllib.request, "urlopen", fake_open)
+    claude = chat_module.ClaudeClient(api_key="secret-k", model="m", base_url="https://relay.example/v1")
+    chat = TestClient(create_chat_app(claude=claude, fds=FdsBridge(down=True)))
+    data = chat.post("/chat-api/chat", json=body("hi")).json()
+    assert seen["user-agent"].startswith("recevie-chat") and seen["authorization"] == "Bearer secret-k"
+    assert "403" in data["message"] and "insufficient credits" in data["message"] and "secret-k" not in data["message"]
