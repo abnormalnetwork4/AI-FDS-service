@@ -6,8 +6,10 @@ After=network.target
 User=__APP_USER__
 WorkingDirectory=__APP_DIR__/backend
 # 운영 서버에서는 화면의 '기록 비우기'를 끕니다.
+# 기록 비우기: 운영은 0(끔). 시연 중 켜려면 1. 대시보드 실시간 연결(SSE)이 열려 있어도 5초 안에 재시작되도록 graceful 시간을 줄였습니다.
 Environment=FDS_ALLOW_CLEAR=0
-ExecStart=__APP_DIR__/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=__APP_DIR__/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 5
+TimeoutStopSec=15
 Restart=always
 RestartSec=3
 
