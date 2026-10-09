@@ -1306,18 +1306,18 @@ export default function RiskDashboard() {
         .window-card__when { font-weight: 600; }
         .window-card__who { color: var(--text-dim); }
         .window-card__formula { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-        .window-card__op { align-self: center; font-size: 18px; font-weight: 600; color: var(--text-dim); }
-        .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-width: 0; }
+        .window-card__op { align-self: center; font-size: 24px; font-weight: 600; color: var(--text-dim); }
+        .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 0; }
         .score-tile--total { border-width: 2px; }
-        .score-tile__label { font-size: 11.5px; color: var(--text-dim); }
-        .score-tile__value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
-        .score-tile__value small { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
-        .score-tile__sub { font-size: 11.5px; color: var(--text-dim); }
-        .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; min-width: 0; }
+        .score-tile__label { font-size: 14px; font-weight: 600; color: var(--text); }
+        .score-tile__value { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+        .score-tile__value small { font-size: 14px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
+        .score-tile__sub { font-size: 13px; color: var(--text-dim); }
+        .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; min-width: 0; }
         .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
         .chat-link { font-size: 12px; font-weight: 600; color: #33429A; text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; white-space: nowrap; align-self: center; }
         .chat-link:hover { background: var(--panel); }
-        .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 12px; }
+        .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 13px; }
         .window-card__occurrence > span:first-child { color: var(--text-dim); }
         .window-card__occurrence b { font-weight: 600; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
         .window-card__occurrence b.is-repeat { border-color: #EAB308; }
