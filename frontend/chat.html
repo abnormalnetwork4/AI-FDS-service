@@ -6,11 +6,11 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="업무를 위한 사내 AI 대화 화면 미리보기">
-  <title>recevie 사내 AI</title>
+  <title>Chat · LLM service for employee</title>
   <style>
     :root {
       --ink: #1c2b43; --muted: #738198; --accent: #2563eb; --accent-light: #edf4ff;
-      --line: #e7edf5; --surface: #ffffff; --sidebar: #f8faff;
+      --line: #e7edf5; --surface: #ffffff; --sidebar: #f9fafc;
       font-family: "Pretendard", "Segoe UI", "Malgun Gothic", sans-serif;
       color: var(--ink); background: var(--surface); font-synthesis: none;
     }
@@ -24,15 +24,12 @@
     [hidden] { display: none !important; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     .app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
-    .sidebar { width: 248px; flex-shrink: 0; padding: 30px 20px 20px; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); color: var(--ink); }
+    .sidebar { width: 224px; flex-shrink: 0; padding: 24px 16px 20px; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); color: var(--ink); }
     .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px; }
-    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; color: #fff; background: var(--accent); border-radius: 11px; }
-    .brand-mark svg { width: 24px; height: 24px; stroke-width: 1.8; }
-    .brand-name { font-size: 24px; font-weight: 650; letter-spacing: -1px; }
-    .brand-caption { display: block; margin: 3px 0 0 1px; color: #8290a6; font-size: 9px; letter-spacing: 2px; }
-    .new-chat { margin-top: 36px; width: 100%; display: flex; align-items: center; gap: 11px; padding: 14px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; transition: background .18s; box-shadow: 0 3px 8px #2563eb14; }
+    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; color: #fff; background: var(--accent); border-radius: 11px; font-size: 22px; font-weight: 700; line-height: 1; }
+    .brand-name { font-size: 20px; font-weight: 650; letter-spacing: -.6px; white-space: nowrap; }
+    .new-chat { margin-top: 28px; width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; transition: background .18s; }
     .new-chat:hover { background: #1d54d2; }
-    .new-chat span:last-child { margin-left: auto; opacity: .7; font-size: 18px; font-weight: 400; }
     .history-section { margin-top: 32px; min-height: 0; flex: 1; display: flex; flex-direction: column; }
     .section-label { margin: 0 12px 13px; font-size: 11px; font-weight: 500; letter-spacing: .2px; color: #8290a6; }
     .history { margin: 0; padding: 0; list-style: none; overflow: auto; scrollbar-width: thin; scrollbar-color: #dce5f2 transparent; }
@@ -42,19 +39,16 @@
     .history-item span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .history-item:hover { background: #f0f4fa; color: var(--ink); }
     .history-item[aria-current="true"] { background: #eaf1ff; color: var(--accent); }
-    .sidebar-note { margin: 24px 3px; padding: 17px 14px; border: 1px solid #e2eaf8; border-radius: 12px; background: #f0f5ff; }
-    .sidebar-note svg { color: #5384de; width: 20px; height: 20px; margin-bottom: 9px; }
-    .sidebar-note strong { display: block; color: #4c6185; font-size: 12px; font-weight: 500; }
-    .sidebar-note p { color: #7a8aa4; font-size: 11px; line-height: 1.8; margin: 8px 0 0; }
     .workspace { display: flex; align-items: center; gap: 11px; padding: 18px 8px 0; border-top: 1px solid var(--line); }
     .workspace-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #4778c8; background: #e8effc; font-size: 12px; font-weight: 600; }
     .workspace strong { display: block; color: #4d5c73; font-size: 11px; font-weight: 500; }
     .workspace small { display: block; margin-top: 5px; color: #8b98ab; font-size: 9px; letter-spacing: 1px; }
+    .workspace > div:last-child { min-width: 0; }
+    .workspace small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .main { min-width: 0; flex: 1; display: flex; flex-direction: column; position: relative; background: var(--surface); }
-    .topbar { height: 80px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 40px; border-bottom: 1px solid var(--line); background: #fff; }
+    .topbar { height: 64px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #fff; }
     .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .topbar-title { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.3px; }
-    .topbar-subtitle { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
     .topbar-right { display: flex; align-items: center; gap: 15px; }
     .preview-badge { display: flex; align-items: center; gap: 7px; border: 1px solid #e1eaf9; border-radius: 20px; padding: 7px 11px; color: #6380ab; background: #f6f9ff; font-size: 10px; white-space: nowrap; }
     .preview-badge::before { content: ""; width: 5px; height: 5px; background: #82a7e8; border-radius: 50%; }
@@ -62,50 +56,28 @@
     .icon-button:hover { background: #edf3ff; color: var(--accent); }
     .mobile-menu { display: none; }
     .scroll-area { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #dee6f1 transparent; }
-    .welcome { width: min(880px,100%); margin: 0 auto; padding: clamp(42px,7vh,90px) 40px 30px; }
-    .welcome-intro { text-align: center; }
-    .hero-mark { margin: 0 auto 25px; width: 62px; height: 62px; display: grid; place-items: center; color: var(--accent); background: #edf4ff; border: 1px solid #e3ecfd; border-radius: 18px; }
-    .hero-mark svg { width: 34px; height: 34px; stroke-width: 1.65; }
-    .eyebrow { margin: 0 0 15px; color: #7290bf; font-size: 9px; font-weight: 500; letter-spacing: 2.6px; }
-    .welcome h1 { margin: 0; color: #1b2b45; font-weight: 550; letter-spacing: -1.8px; line-height: 1.5; font-size: clamp(27px,2.8vw,36px); }
-    .welcome h1 em { font-style: normal; color: var(--accent); }
-    .welcome-description { margin: 16px 0 0; color: #7d8aa0; font-size: 12px; line-height: 1.9; word-break: keep-all; }
-    .suggestion-heading { display: flex; justify-content: space-between; align-items: center; margin: 43px 0 14px; }
-    .suggestion-heading span { font-size: 11px; color: #65758e; }
-    .suggestion-heading small { font-size: 10px; color: #95a1b3; }
-    .suggestions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
-    .suggestion { min-height: 153px; padding: 18px 16px 15px; text-align: left; position: relative; background: #fff; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); transition: border-color .2s, background .2s, transform .2s; }
-    .suggestion:hover { border-color: #adc8fa; background: #fafdff; transform: translateY(-2px); }
-    .card-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; margin-bottom: 15px; background: #eff5ff; color: #5480d3; }
-    .card-icon svg { width: 17px; height: 17px; }
-    .suggestion strong { display: block; font-size: 12px; font-weight: 600; letter-spacing: -.2px; }
-    .suggestion p { margin: 7px 0 0; font-size: 11px; line-height: 1.65; color: #8490a2; word-break: keep-all; }
-    .card-arrow { position: absolute; top: 23px; right: 16px; width: 14px; height: 14px; color: #a4b3c9; }
-    .messages { width: min(820px,100%); padding: 34px 36px; margin: 0 auto; display: flex; flex-direction: column; gap: 29px; }
-    .message { display: flex; gap: 12px; max-width: 93%; align-items: flex-start; animation: arrive .22s ease-out; }
-    .message.user { align-self: flex-end; flex-direction: row-reverse; }
-    .message-avatar { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 9px; flex-shrink: 0; color: #4278d1; background: #edf4ff; font-size: 9px; font-weight: 600; }
-    .message-avatar svg { width: 18px; height: 18px; }
-    .user .message-avatar { background: #f1f4f9; color: #73829a; }
-    .message-author { font-size: 10px; font-weight: 600; margin: 3px 0 9px; color: #6c7a91; }
-    .user .message-author { text-align: right; }
-    .message-body { padding: 0 0 4px; font-size: 13px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .user .message-body { padding: 13px 17px; border-radius: 14px 3px 14px 14px; background: #edf4ff; color: #365783; }
+    .empty-state { min-height: 100%; display: grid; place-items: center; padding: 32px 24px; text-align: center; }
+    .empty-state h1 { margin: 0; font-size: clamp(16px,3vw,30px); font-weight: 600; line-height: 1.6; letter-spacing: -.8px; white-space: nowrap; }
+    .empty-state h1 span { color: var(--accent); }
+    .messages { width: min(960px,100%); padding: 28px 32px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+    .message { display: flex; min-width: 0; max-width: 78%; align-items: flex-start; animation: arrive .22s ease-out; }
+    .message.user { align-self: flex-start; }
+    .message.assistant { align-self: flex-end; }
+    .message-content { min-width: 0; width: 100%; }
+    .message-author { font-size: 11px; font-weight: 600; margin: 0 0 7px; color: var(--muted); }
+    .assistant .message-author { text-align: right; color: var(--accent); }
+    .message-body { padding: 13px 17px; border: 1px solid var(--line); border-radius: 14px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .user .message-body { border-top-left-radius: 4px; background: #f8fafc; }
+    .assistant .message-body { border-color: #e0eaff; border-top-right-radius: 4px; background: var(--accent-light); }
     .demo-label { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; margin-top: 9px; background: #f3f6fb; color: #8391a6; font-size: 9px; }
     .demo-label svg { width: 11px; height: 11px; }
-    .composer-section { flex-shrink: 0; width: min(880px,100%); margin: 0 auto; padding: 15px 40px 23px; }
-    .composer { background: #fff; border: 1px solid #dce5f1; border-radius: 15px; box-shadow: 0 5px 24px #1d448009; transition: border-color .2s,box-shadow .2s; }
-    .composer:focus-within { border-color: #91b5f7; box-shadow: 0 0 0 3px #2563eb0a,0 5px 24px #1d448009; }
-    .input-row { display: flex; align-items: flex-start; padding: 18px 19px 0; gap: 13px; }
-    .input-spark { color: #729bdf; margin-top: 3px; width: 18px; height: 18px; }
-    textarea { width: 100%; border: 0; padding: 0; resize: none; background: transparent; color: var(--ink); font-size: 13px; line-height: 1.7; height: 48px; min-height: 48px; max-height: 180px; scrollbar-width: thin; }
+    .composer-section { flex-shrink: 0; width: min(960px,100%); margin: 0 auto; padding: 16px 32px 20px; }
+    .composer { background: #fff; border: 1px solid #dce5f1; border-radius: 12px; transition: border-color .2s,box-shadow .2s; }
+    .composer:focus-within { border-color: #91b5f7; box-shadow: 0 0 0 3px #2563eb0a; }
+    .input-row { display: flex; align-items: flex-end; padding: 12px 14px; gap: 12px; }
+    textarea { width: 100%; border: 0; padding: 3px 0; resize: none; background: transparent; color: var(--ink); font-size: 14px; line-height: 1.7; height: 32px; min-height: 32px; max-height: 180px; scrollbar-width: thin; }
     textarea::placeholder { color: #929fb3; }
     textarea:focus-visible { outline: none; }
-    .composer-bottom { padding: 6px 14px 12px 18px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
-    .tools { display: flex; align-items: center; gap: 6px; }
-    .prompt-chip { display: flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #eaf0f8; border-radius: 6px; background: #f8faff; color: #7890b3; font-size: 9px; }
-    .prompt-chip svg { width: 12px; height: 12px; }
-    .prompt-chip:hover { background: var(--accent-light); color: var(--accent); border-color: #d3e3ff; }
     .send-area { display: flex; align-items: center; gap: 9px; }
     .char-count { font-size: 9px; color: #8f9db3; font-variant-numeric: tabular-nums; }
     .send-button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: #fff; transition: background .18s,transform .18s; }
@@ -125,23 +97,9 @@
     dialog p { font-size: 12px; line-height: 1.9; color: #74839b; }
     .dialog-tips { border-top: 1px solid var(--line); margin-top: 19px; padding-top: 12px; }
     @keyframes arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-    @media (min-width: 1450px) { .welcome { padding-top: 11vh; } }
     @media (max-width: 1100px) {
-      .sidebar { width: 218px; padding-inline: 15px; }
-      .topbar { padding-inline: 28px; }
-      .welcome { padding-inline: 28px; }
-      .composer-section { padding-inline: 28px; }
-      .suggestions { gap: 9px; }
-      .suggestion { padding-inline: 13px; }
-      .suggestion p { font-size: 10px; }
-    }
-    @media (max-width: 900px) {
-      .suggestions { grid-template-columns: repeat(2,minmax(0,1fr)); }
-      .suggestion { min-height: 124px; padding: 16px; }
-      .card-icon { margin-bottom: 10px; }
-      .welcome { padding-top: 34px; }
-      .hero-mark { margin-bottom: 18px; width: 55px; height: 55px; border-radius: 16px; }
-      .suggestion-heading { margin-top: 28px; }
+      .sidebar { width: 208px; padding-inline: 14px; }
+      .messages, .composer-section { padding-inline: 24px; }
     }
     @media (max-width: 640px) {
       .sidebar { position: fixed; inset: 0 auto 0 0; width: 268px; z-index: 20; transform: translateX(-100%); transition: transform .22s ease; padding-top: 27px; }
@@ -151,35 +109,20 @@
       .sidebar-close { display: grid; position: absolute; top: 13px; right: 12px; color: #7e8ca1; }
       .sidebar-close:hover { background: #eaf1ff; color: var(--accent); }
       .mobile-menu { display: grid; margin-left: -5px; flex-shrink: 0; }
-      .topbar { height: 68px; padding: 0 18px; gap: 8px; }
+      .topbar { height: 60px; padding: 0 16px; gap: 8px; }
       .topbar-left { gap: 8px; }
       .topbar-title { font-size: 12px; }
-      .topbar-subtitle { display: none; }
       .topbar-right { gap: 8px; }
       .preview-badge { font-size: 9px; padding: 6px 8px; }
-      .welcome { padding: 30px 23px 24px; }
-      .eyebrow { font-size: 8px; letter-spacing: 2px; }
-      .welcome h1 { font-size: 28px; letter-spacing: -1.5px; }
-      .welcome-description { font-size: 11px; margin-top: 11px; }
-      .suggestion-heading { margin-top: 26px; }
-      .suggestion-heading small { display: none; }
-      .suggestion { min-height: 120px; padding: 14px; border-radius: 11px; }
-      .suggestion strong { font-size: 11px; }
-      .suggestion p { font-size: 10px; }
-      .card-icon { width: 29px; height: 29px; margin-bottom: 10px; }
-      .card-arrow { top: 19px; right: 13px; }
       .composer-section { padding: 8px 15px max(14px,env(safe-area-inset-bottom)); }
-      .input-row { padding: 15px 14px 0; gap: 10px; }
-      textarea { font-size: 16px; height: 50px; min-height: 50px; }
-      textarea::placeholder { font-size: 12px; }
-      .composer-bottom { padding: 5px 12px 10px 14px; }
-      .prompt-chip { padding: 6px; font-size: 9px; }
-      .tools { gap: 4px; }
+      .input-row { padding: 10px 12px; gap: 8px; }
+      textarea { font-size: 16px; height: 34px; min-height: 34px; }
+      textarea::placeholder { font-size: 14px; }
       .composer-footer { justify-content: center; font-size: 8px; margin-top: 9px; }
       .keyboard-hint { display: none !important; }
-      .messages { padding: 26px 20px; gap: 25px; }
-      .message { max-width: 100%; gap: 9px; }
-      .message-body { font-size: 12px; }
+      .messages { padding: 24px 16px; gap: 20px; }
+      .message { max-width: 88%; }
+      .message-body { padding: 11px 14px; font-size: 14px; }
       .char-count { font-size: 8px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -187,6 +130,7 @@
     button.workspace:hover strong { text-decoration: underline; }
     .message-body.md { white-space: normal; }
     .message-body.md p { margin: 0 0 8px; }
+    .message-body.md > :last-child { margin-bottom: 0; }
     .message-body.md h3, .message-body.md h4, .message-body.md h5, .message-body.md h6 { margin: 14px 0 6px; font-size: 14px; font-weight: 700; color: var(--ink, #1c2a44); }
     .message-body.md h3 { font-size: 15px; }
     .message-body.md ul, .message-body.md ol { margin: 4px 0 10px; padding-left: 20px; }
@@ -201,15 +145,8 @@
 <body>
   <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
     <defs>
-      <symbol id="i-brand" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M5.6 18.4 18.4 5.6"/><path d="m9 3 3 3 3-3M9 21l3-3 3 3M3 9l3 3-3 3M21 9l-3 3 3 3"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h6"/></symbol>
-      <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3Z"/></symbol>
-      <symbol id="i-document" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
-      <symbol id="i-pen" viewBox="0 0 24 24"><path d="m15 5 4 4M4 20l4-1L21 6a2.8 2.8 0 0 0-4-4L4 15v5ZM11 20h9"/></symbol>
-      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 3v17h17M8 15v-4M13 15V7M18 15V5"/></symbol>
-      <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M8.5 15a6 6 0 1 1 7 0l-.5 3H9l-.5-3ZM12 3V1M3 10H1M23 10h-2"/></symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol>
       <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/></symbol>
       <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
@@ -220,53 +157,36 @@
     <button class="drawer-backdrop" id="drawer-backdrop" aria-label="대화 목록 닫기" tabindex="-1"></button>
     <aside class="sidebar" id="sidebar" aria-label="워크스페이스와 대화 목록">
       <button class="icon-button sidebar-close" id="sidebar-close" aria-label="대화 목록 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
-      <div class="brand"><span class="brand-mark"><svg aria-hidden="true"><use href="#i-brand"/></svg></span><div><span class="brand-name">recevie</span><span class="brand-caption">AI WORKSPACE</span></div></div>
-      <button class="new-chat" id="new-chat"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>새로운 대화</span><span aria-hidden="true">↗</span></button>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span><span class="brand-name">Chat</span></div>
+      <button class="new-chat" id="new-chat"><svg aria-hidden="true"><use href="#i-plus"/></svg><span>새로운 대화</span></button>
       <nav class="history-section" aria-label="최근 대화">
         <p class="section-label">최근 대화</p>
         <ul class="history" id="history"></ul>
       </nav>
-      <div class="sidebar-note"><svg aria-hidden="true"><use href="#i-bulb"/></svg><strong>작은 질문에서 시작해요.</strong><p>정리되지 않은 생각도 괜찮아요.<br>대화하며 하나씩 구체화해 보세요.</p></div>
       <button class="workspace" id="user-switch" type="button" title="사용자 ID 바꾸기 (시연용)"><div class="workspace-avatar" aria-hidden="true">W</div><div><strong id="user-label">사내 워크스페이스</strong><small id="device-label">YOUR PERSONAL SPACE</small></div></button>
     </aside>
     <main class="main">
       <header class="topbar">
-        <div class="topbar-left"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="대화 목록 열기" aria-controls="sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-menu"/></svg></button><div><p class="topbar-title">사내 AI 어시스턴트</p><p class="topbar-subtitle">아이디어에서 실행까지, 대화로 함께</p></div></div>
+        <div class="topbar-left"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="대화 목록 열기" aria-controls="sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-menu"/></svg></button><p class="topbar-title">LLM service for employee</p></div>
         <div class="topbar-right"><span class="preview-badge" id="ai-status" title="보낸 프롬프트는 회사 보안 정책에 따라 위험도 분석(FDS)에 기록됩니다.">FDS 모니터링</span><button class="icon-button" id="help-button" aria-label="사용 안내"><svg aria-hidden="true"><use href="#i-info"/></svg></button></div>
       </header>
       <div class="scroll-area" id="scroll-area">
-        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
-          <div class="welcome-intro">
-            <div class="hero-mark"><svg aria-hidden="true"><use href="#i-brand"/></svg></div>
-            <p class="eyebrow">YOUR WORK, A LITTLE LIGHTER</p>
-            <h1 id="welcome-title">생각을 정리하고,<br><em>다음 일을 시작해요.</em></h1>
-            <p class="welcome-description">복잡한 문서부터 새로운 아이디어까지.<br>오늘의 업무를 함께 풀어갈 어시스턴트예요.</p>
-          </div>
-          <div class="suggestion-heading"><span>이렇게 시작해 볼까요?</span><small>카드를 눌러 질문을 준비해 보세요</small></div>
-          <div class="suggestions">
-            <button class="suggestion" data-template="summary"><span class="card-icon"><svg aria-hidden="true"><use href="#i-document"/></svg></span><svg class="card-arrow" aria-hidden="true"><use href="#i-arrow"/></svg><strong>문서 핵심 요약</strong><p>긴 문서의 중요한 내용을<br>한눈에 정리해 보세요.</p></button>
-            <button class="suggestion" data-template="writing"><span class="card-icon"><svg aria-hidden="true"><use href="#i-pen"/></svg></span><svg class="card-arrow" aria-hidden="true"><use href="#i-arrow"/></svg><strong>업무 글쓰기</strong><p>메일과 보고서의 첫 문장을<br>더 쉽게 시작해 보세요.</p></button>
-            <button class="suggestion" data-template="analysis"><span class="card-icon"><svg aria-hidden="true"><use href="#i-chart"/></svg></span><svg class="card-arrow" aria-hidden="true"><use href="#i-arrow"/></svg><strong>데이터 인사이트</strong><p>숫자 속 흐름과 의미를<br>차근차근 살펴보세요.</p></button>
-            <button class="suggestion" data-template="ideas"><span class="card-icon"><svg aria-hidden="true"><use href="#i-bulb"/></svg></span><svg class="card-arrow" aria-hidden="true"><use href="#i-arrow"/></svg><strong>아이디어 함께 찾기</strong><p>새로운 관점으로<br>생각의 폭을 넓혀 보세요.</p></button>
-          </div>
-        </section>
+        <section class="empty-state" id="empty-state" aria-labelledby="greeting-title"><h1 id="greeting-title">안녕하세요, <span>무엇을 도와드릴까요?</span></h1></section>
         <div class="messages" id="messages" role="log" aria-label="대화 내용" aria-live="polite" aria-relevant="additions" hidden></div>
       </div>
       <section class="composer-section" aria-label="프롬프트 입력">
         <form class="composer" id="prompt-form">
-          <div class="input-row"><svg class="input-spark" aria-hidden="true"><use href="#i-spark"/></svg><label class="sr-only" for="prompt-input">AI에게 보낼 메시지</label><textarea id="prompt-input" rows="2" maxlength="8000" placeholder="무엇이든 물어보세요. 함께 생각해 볼게요." aria-describedby="composer-note"></textarea></div>
-          <div class="composer-bottom">
-            <div class="tools" aria-label="질문 예시"><button class="prompt-chip" type="button" data-template="summary"><svg aria-hidden="true"><use href="#i-document"/></svg>요약</button><button class="prompt-chip" type="button" data-template="writing"><svg aria-hidden="true"><use href="#i-pen"/></svg>글쓰기</button><button class="prompt-chip" type="button" data-template="ideas"><svg aria-hidden="true"><use href="#i-bulb"/></svg>아이디어</button></div>
+          <div class="input-row"><label class="sr-only" for="prompt-input">AI에게 보낼 메시지</label><textarea id="prompt-input" rows="1" maxlength="8000" placeholder="메시지를 입력하세요" aria-describedby="composer-note"></textarea>
             <div class="send-area"><span class="char-count" id="char-count" aria-live="off" hidden></span><button class="icon-button" id="clear-input" type="button" aria-label="입력 내용 지우기" hidden><svg aria-hidden="true"><use href="#i-close"/></svg></button><button class="send-button" id="send-button" type="submit" aria-label="메시지 전송" disabled><svg aria-hidden="true"><use href="#i-up"/></svg></button></div>
           </div>
         </form>
-        <div class="composer-footer"><span id="composer-note"><svg aria-hidden="true"><use href="#i-info"/></svg>이 대화는 회사 보안 정책에 따라 위험도 분석(FDS)에 기록돼요.</span><span class="keyboard-hint"><kbd class="key">Enter</kbd> 전송 <span aria-hidden="true">·</span> <kbd class="key">Shift + Enter</kbd> 줄바꿈</span></div>
+        <div class="composer-footer"><span id="composer-note">대화는 회사 보안 정책에 따라 FDS에 기록됩니다.</span><span class="keyboard-hint"><kbd class="key">Enter</kbd> 전송 <span aria-hidden="true">·</span> <kbd class="key">Shift + Enter</kbd> 줄바꿈</span></div>
       </section>
     </main>
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title">
-    <div class="dialog-heading"><h2 id="help-title">recevie 사용 안내</h2><button class="icon-button" id="close-help" aria-label="사용 안내 닫기" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
-    <p>하고 싶은 일을 입력하고 전송 버튼을 눌러 보세요. 질문 예시 카드를 누르면 시작하기 좋은 문장이 준비돼요.</p>
+    <div class="dialog-heading"><h2 id="help-title">Chat 사용 안내</h2><button class="icon-button" id="close-help" aria-label="사용 안내 닫기" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p>메시지를 입력하고 전송 버튼을 누르세요. 내 메시지는 왼쪽, AI 답변은 오른쪽에 표시됩니다.</p>
     <div class="dialog-tips"><p>Enter로 전송하고, Shift + Enter로 줄을 바꿀 수 있어요. ‘새로운 대화’로 다른 주제의 대화를 시작할 수 있어요.</p><p>답변은 회사 채팅 서버를 거쳐 Claude가 생성해요. 보낸 프롬프트는 보안 정책에 따라 위험도 분석(FDS)에 기록되지만 대화를 막지는 않아요. 대화 목록은 이 페이지를 열어 둔 동안만 유지돼요.</p><p>사용자 ID는 왼쪽 아래를 눌러 바꿀 수 있어요(시연용). 주소 뒤에 <code>?user=user-01</code>을 붙여도 돼요.</p></div>
   </dialog>
   <script>
@@ -289,7 +209,7 @@
     const input = $('prompt-input');
     const history = $('history');
     const messages = $('messages');
-    const welcome = $('welcome');
+    const emptyState = $('empty-state');
     const scrollArea = $('scroll-area');
     const sidebar = $('sidebar');
     const menuButton = $('mobile-menu');
@@ -298,12 +218,6 @@
     const drafts = new Map();
     let activeId = null;
     let nextId = 1;
-    const templates = {
-      summary: '아래 내용을 핵심 요점 3가지와 다음에 해야 할 일로 정리해 주세요.\n\n[요약할 내용을 여기에 입력해 주세요]',
-      writing: '아래 상황에 맞는 간결하고 정중한 업무 메일 초안을 작성해 주세요.\n\n목적: \n받는 사람: \n전달할 내용: ',
-      analysis: '아래 데이터의 주요 흐름과 눈에 띄는 변화를 설명해 주세요. 확인이 필요한 부분도 함께 정리해 주세요.\n\n[분석할 내용을 여기에 입력해 주세요]',
-      ideas: '아래 주제를 바탕으로 실행 가능한 아이디어 5가지를 제안해 주세요. 각 아이디어의 기대 효과와 첫 단계를 함께 적어 주세요.\n\n주제: '
-    };
 
     function icon(name) {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -329,8 +243,7 @@
       if (!conversations.length) {
         const empty = document.createElement('li');
         empty.className = 'history-empty';
-        empty.textContent = '아직 대화가 없어요.\n첫 질문을 시작해 보세요.';
-        empty.style.whiteSpace = 'pre-line';
+        empty.textContent = '대화 없음';
         history.append(empty);
         return;
       }
@@ -382,17 +295,13 @@
 
     function appendMessage(message, detached = false) {
       const row = document.createElement('article');
-      const avatar = document.createElement('div');
       const content = document.createElement('div');
       const author = document.createElement('div');
       const body = document.createElement('div');
       row.className = 'message ' + message.role;
-      avatar.className = 'message-avatar';
-      avatar.setAttribute('aria-hidden', 'true');
-      if (message.role === 'user') avatar.textContent = 'ME';
-      else avatar.append(icon('brand'));
+      content.className = 'message-content';
       author.className = 'message-author';
-      author.textContent = message.role === 'user' ? '나' : 'recevie';
+      author.textContent = message.role === 'user' ? '나' : 'Chat';
       body.className = 'message-body';
       if (message.role === 'assistant' && !message.note && !message.pending) {
         body.classList.add('md');
@@ -407,7 +316,7 @@
         label.append(icon('info'), document.createTextNode(message.pending ? '답변 대기 중' : '안내 메시지'));
         content.append(label);
       }
-      row.append(avatar, content);
+      row.append(content);
       if (!detached) messages.append(row);
       return row;
     }
@@ -415,10 +324,10 @@
     function renderConversation() {
       const conversation = conversations.find((item) => item.id === activeId);
       const hasMessages = Boolean(conversation?.messages.length);
-      welcome.hidden = hasMessages;
+      emptyState.hidden = hasMessages;
       messages.hidden = !hasMessages;
       messages.replaceChildren();
-      conversation?.messages.forEach(appendMessage);
+      conversation?.messages.forEach((message) => appendMessage(message));
       renderHistory();
       requestAnimationFrame(() => { scrollArea.scrollTop = hasMessages ? scrollArea.scrollHeight : 0; });
     }
@@ -471,7 +380,7 @@
       conversation.messages.push(userMessage);
       const history = conversation.messages.filter((m) => !m.note).map((m) => ({ role: m.role, text: m.text }));
       conversation.messages.push(reply);
-      welcome.hidden = true;
+      emptyState.hidden = true;
       messages.hidden = false;
       appendMessage(userMessage);
       const replyNode = appendMessage(reply);
@@ -532,28 +441,6 @@
       }
     });
     $('clear-input').addEventListener('click', () => { input.value = ''; updateInput(); input.focus(); });
-    document.querySelectorAll('[data-template]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const template = templates[button.dataset.template];
-        if (!input.value.trim()) {
-          input.value = template;
-          updateInput();
-          input.focus();
-          const placeholderStart = template.indexOf('[');
-          if (placeholderStart !== -1) input.setSelectionRange(placeholderStart, template.indexOf(']') + 1);
-          else input.setSelectionRange(input.value.length, input.value.length);
-        } else {
-          // Preserve an existing draft. Add the selected example only when it fits.
-          const addition = '\n\n' + template;
-          if (input.value.length + addition.length <= input.maxLength) {
-            input.value += addition;
-            updateInput();
-          }
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-        }
-      });
-    });
     $('new-chat').addEventListener('click', () => switchConversation(null));
     menuButton.addEventListener('click', () => setDrawer(true));
     $('sidebar-close').addEventListener('click', () => setDrawer(false));
