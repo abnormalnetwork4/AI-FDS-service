@@ -1371,7 +1371,7 @@ export default function RiskDashboard() {
         .window-card__op { align-self: center; font-size: 20px; font-weight: 500; color: var(--text-mute); }
         .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 1px; background: var(--tint); border: 1px solid transparent; border-radius: 12px; padding: 12px 16px; min-width: 0; }
         .score-tile--total { background: var(--panel); border-width: 2px; padding: 11px 15px; }
-        .score-tile__label { font-size: 13px; font-weight: 500; color: var(--text-dim); }
+        .score-tile__label { font-size: 15px; font-weight: 700; color: var(--text); }
         .score-tile__value { font-size: 32px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
         .score-tile__value small { font-size: 13.5px; font-weight: 500; color: var(--text-mute); margin-left: 3px; letter-spacing: 0; }
         .review-badge { display: inline-flex; align-items: center; margin-left: 8px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--tint); color: var(--text); font-size: 12px; font-weight: 700; line-height: 20px; white-space: nowrap; vertical-align: middle; }

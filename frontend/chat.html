@@ -61,14 +61,16 @@
     .empty-state h1 span { color: var(--accent); }
     .messages { width: min(960px,100%); padding: 28px 32px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
     .message { display: flex; min-width: 0; max-width: 78%; align-items: flex-start; animation: arrive .22s ease-out; }
-    .message.user { align-self: flex-start; }
-    .message.assistant { align-self: flex-end; }
+    /* 내 메시지는 오른쪽, AI 답변은 왼쪽(일반적인 채팅 배치) */
+    .message.user { align-self: flex-end; }
+    .message.assistant { align-self: flex-start; }
     .message-content { min-width: 0; width: 100%; }
     .message-author { font-size: 11px; font-weight: 600; margin: 0 0 7px; color: var(--muted); }
-    .assistant .message-author { text-align: right; color: var(--accent); }
+    .user .message-author { text-align: right; }
+    .assistant .message-author { color: var(--accent); }
     .message-body { padding: 13px 17px; border: 1px solid var(--line); border-radius: 14px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .user .message-body { border-top-left-radius: 4px; background: #f8fafc; }
-    .assistant .message-body { border-color: #e0eaff; border-top-right-radius: 4px; background: var(--accent-light); }
+    .user .message-body { border-color: #e0eaff; border-top-right-radius: 4px; background: var(--accent-light); }
+    .assistant .message-body { border-top-left-radius: 4px; background: #f8fafc; }
     .demo-label { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; margin-top: 9px; background: #f3f6fb; color: #8391a6; font-size: 9px; }
     .demo-label svg { width: 11px; height: 11px; }
     .composer-section { flex-shrink: 0; width: min(960px,100%); margin: 0 auto; padding: 16px 32px 20px; }
