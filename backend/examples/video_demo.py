@@ -99,6 +99,13 @@ DANGER = [
         packets_received=10, request_bytes=700_000, files=7, tenant="personal", retry=True),
 ]
 
+# 네트워크는 정상 수준인데 프롬프트 한 건이 여러 위험 유형을 동시에 반복하는 경우(프롬프트 점수만으로 강제 위험 규칙 대상)
+PROMPT_DANGER = [
+    req(30, "이번 주 회의 안건을 정리해 주세요.", sent=3_300, received=8_800, packets_sent=6, packets_received=10),
+    req(120, DANGER_PROMPT, sent=2_400, received=5_200, packets_sent=5, packets_received=8),
+    req(210, "출장 보고서 초안을 써 주세요.", sent=3_600, received=9_900, packets_sent=6, packets_received=11),
+]
+
 # 패턴 → 목표 등급과 설명. 실제 등급은 서버 응답만 사용합니다.
 PATTERNS = {
     "normal": dict(target="normal", events=NORMAL, intent="일반 업무 요약, 작은 전송량, 파일·재시도 없음"),
@@ -109,6 +116,8 @@ PATTERNS = {
                     intent="자동화 스크립트 2개의 12초 간격 반복 요청 22건, 중간 전송량, 응답 수집 의도"),
     "danger": dict(target="danger", events=DANGER,
                    intent="위험 프롬프트, 대용량 파일 전송, 테넌트·목적지 전환, 차단 후 재시도"),
+    "prompt_danger": dict(target="danger", events=PROMPT_DANGER,
+                          intent="정상 전송량 요청 3건 중 복합 위험 프롬프트 1건(강제 위험 규칙)"),
 }
 
 # 가상 사용자 10명. plan = {구간 시작 분(10시 기준): 패턴}. 비어 있는 시간대는 활동 없음.
@@ -135,6 +144,17 @@ USERS = [
     dict(user="user-10", device="pc-10", story="출근 직후 유출 시도 후 정상 업무",
          plan={0: "danger", 5: "normal"}),
 ]
+
+
+# 결과 정리서 '주요 테스트 결과' 표 시연용: 5개 시나리오를 같은 10:00 구간에 한 명씩 배치(--set report)
+REPORT_USERS = [
+    dict(user="test-1-normal", device="pc-t1", story="정상 업무", plan={0: "normal"}),
+    dict(user="test-2-prompt", device="pc-t2", story="프롬프트 단독 위험", plan={0: "caution_prompt"}),
+    dict(user="test-3-auto", device="pc-t3", story="자동화 + 증류 위험", plan={0: "warning"}),
+    dict(user="test-4-upload", device="pc-t4", story="대량 전송 + 재시도 위험", plan={0: "danger"}),
+    dict(user="test-5-forced", device="pc-t5", story="프롬프트 강제 위험", plan={0: "prompt_danger"}),
+]
+USER_SETS = {"default": USERS, "report": REPORT_USERS}
 
 
 def slot_start(day, minute):
@@ -405,7 +425,11 @@ def main(argv=None, api=None):
                         help="시연 날짜(KST, YYYY-MM-DD). 여러 개 가능. 기본: 오늘. 각 날짜의 10:00~10:20 구간을 사용합니다.")
     parser.add_argument("--timeout", type=float, default=30, help="구간 재계산 대기 시간(초)")
     parser.add_argument("--detail", action="store_true", help="구간마다 점수 구성 등 상세 출력")
+    parser.add_argument("--set", choices=sorted(USER_SETS), default="default",
+                        help="report: 결과 정리서 주요 테스트 5개 시나리오만 10:00 구간에 실행")
     args = parser.parse_args(argv)
+    global USERS
+    USERS = USER_SETS[args.set]
     api = api or Api(args.base_url)
     try:
         check_server(api)
