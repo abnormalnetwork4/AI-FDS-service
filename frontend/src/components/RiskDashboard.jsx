@@ -1,4 +1,4 @@
-import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, networkBreakdownText, occurrenceSummary, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
+import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, eventLevel, sameSlotSummary, fetchDates, fetchUsers, fetchSameSlot, fetchEventPage, formatScore, isNotable, isSummaryItem, networkBreakdownParts, occurrenceSummary, promptScoreRows, shouldNotify, viewStatus } from "../lib/events.js";
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import RiskOverview from "./RiskOverview.jsx";
@@ -12,23 +12,22 @@ import {
   User,
   Network,
   MessageSquareWarning,
-  ChevronRight,
   ChevronDown,
   Radio,
   Download,
-  Sparkles,
   Pause,
   Play,
-  Loader2,
   ArrowUpDown,
   TriangleAlert,
   X,
-  Gauge,
   RefreshCw,
   StepForward,
   Inbox,
   WifiOff,
   Flame,
+  FlaskConical,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -156,6 +155,16 @@ async function explainEvent(event) {
   return res.json();
 }
 
+// 서버 요약은 줄바꿈으로 문장이 나뉘어 옵니다. 줄 단위로 보여 주고, ISO 시각(UTC)은 보기 쉬운 현지 시각으로 바꿉니다.
+const ISO_TIME = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
+const LLM_PREVIEW_LINES = 4;
+function summaryLines(text) {
+  return String(text ?? "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => line.replace(ISO_TIME, (m) => {
+    const d = new Date(m);
+    return Number.isNaN(d.getTime()) ? m : d.toLocaleString("ko-KR", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  }));
+}
+
 function useEvents({ live, filters }) {
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
@@ -265,17 +274,14 @@ function buildFallbackSummary(e) {
   if (e.isReal) {
     const grade = eventLevel(e);
     const head = ["pending", "error"].includes(grade) ? e.reason
-      : `통합 등급 ${LEVELS[grade].label}${e.score != null ? `(${formatScore(e.score)}점)` : ""}.${e.override ? ` 강제 위험 규칙 적용: ${e.overrideReasons.join(", ") || "사유 미제공"}.` : ""}`;
-    return `${e.user}: ${head} 저장된 화면 데이터 기준이며 최신 서버 요약 조회에 실패했습니다.`;
+      : `통합 등급 ${LEVELS[grade].label}${e.score != null ? `(${formatScore(e.score)}점)` : ""}.${e.override ? ` 강제 위험 규칙 적용: ${e.overrideReasons.join(" / ")}.` : ""}`;
+    return `${e.user}: ${head}\n저장된 화면 데이터 기준이며 최신 서버 요약 조회에 실패했습니다.`;
   }
   const level = LEVELS[eventLevel(e)].label;
   const top = topContributors(e, 3);
-  if (!top.length) {
-    return `${e.user} 세션은 모든 탐지 항목이 정상 범위여서 ${e.score}점(${level})으로 산정되었습니다. 예측 신뢰도는 ${e.confidence}%입니다.`;
-  }
+  if (!top.length) return `${e.user} 세션은 모든 탐지 항목이 정상 범위여서 ${e.score}점(${level})으로 산정되었습니다.`;
   const parts = top.map((t) => `${t.label}(${t.detail})`).join(", ");
-  const tail = e.confidence < 60 ? "로 낮은 편이라 담당자의 직접 확인이 필요합니다" : "입니다";
-  return `${e.user} 세션은 ${parts} 등이 주된 원인이 되어 ${e.score}점(${level})으로 산정되었습니다. 예측 신뢰도는 ${e.confidence}%${tail}.`;
+  return `${e.user} 세션은 ${parts} 등이 주된 원인이 되어 ${e.score}점(${level})으로 산정되었습니다.`;
 }
 
 // CSV — 따옴표/쉼표 이스케이프 + 엑셀 수식 인젝션 방어
@@ -314,7 +320,6 @@ function EvidenceItem({ item, compact = false }) {
   }
   return (
     <li className="evidence-item evidence-item--hit" style={{ borderLeftColor: color }}>
-      <StatusIcon status={status} />
       <div className="evidence-item__text">
         <div className="evidence-item__row">
           <span className="evidence-item__label">
@@ -324,7 +329,7 @@ function EvidenceItem({ item, compact = false }) {
           <span className="evidence-item__chip" style={{ color, borderColor: color }}>{label}</span>
         </div>
         {item.detail && <span className="evidence-item__detail">{item.detail.replace(LABEL_TAIL, "")}</span>}
-        {item.probability != null && (
+        {item.probability != null && !/확률\s*[\d.]+%/.test(item.detail ?? "") && (
           <span className="evidence-item__metric-line" style={{ color }}>
             모델 확률 {(item.probability * 100).toFixed(1)}%
             {item.detection_method === 'argmax' ? ' · 최다 확률 클래스 기준' : item.threshold != null ? ` · 판정 기준 ${(item.threshold * 100).toFixed(1)}% 초과` : ''}
@@ -338,7 +343,7 @@ function EvidenceItem({ item, compact = false }) {
   );
 }
 
-function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggle, note }) {
+function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggle, note, embedded = false }) {
   const summary = allItems.filter(isSummaryItem);
   const items = allItems.filter((i) => !isSummaryItem(i));
   const sorted = sortItems(items);
@@ -348,7 +353,7 @@ function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggl
   const rows = expanded ? sorted : shown;
 
   return (
-    <div className="evidence-group" style={{ borderLeftColor: accent }}>
+    <div className={`evidence-group ${embedded ? "evidence-group--embedded" : ""}`} style={{ "--line-accent": accent }}>
       <div className="evidence-group__head">
         {icon}
         <span>{title}</span>
@@ -369,7 +374,7 @@ function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggl
           {expanded ? "탐지 없는 항목 접기" : `탐지 없는 ${folded.length}개 항목 보기`}
         </button>
       )}
-      {summary.length > 0 && (
+      {summary.some((i) => i.status === "error" || i.status === "pending") && (
         <details className="evidence-summary">
           <summary>네트워크 종합·모델 상태 ({summary.length})</summary>
           {summary.map((i) => (
@@ -381,7 +386,7 @@ function EvidenceGroup({ title, icon, items: allItems, accent, expanded, onToggl
           ))}
         </details>
       )}
-      {note && <div className="evidence-note">{note}</div>}
+      {note && <details className="fold"><summary>안내 보기</summary><div className="evidence-note">{note}</div></details>}
     </div>
   );
 }
@@ -445,35 +450,10 @@ function RiskScoreBadge({ score, level }) {
   );
 }
 
-// 예측 신뢰도 — 위험도 색(빨강/주황/초록)과 겹치지 않도록 파랑 계열 + 낮음은 빗금 패턴으로 표현
-function ConfidenceMeter({ confidence }) {
-  if (confidence == null) return <div className="confidence-card"><div className="confidence-card__title">예측 신뢰도</div><div className="confidence-card__num">—</div><div className="confidence-card__tier">미제공</div></div>;
-  const tier = confidence >= 80 ? "높음" : confidence >= 60 ? "보통" : "낮음";
-  const textColor = confidence >= 80 ? "#33429A" : "#5A6072";
-  const fillStyle =
-    confidence >= 80
-      ? { background: "#33429A" }
-      : confidence >= 60
-      ? { background: "#7C8BD0" }
-      : { background: "repeating-linear-gradient(135deg, #8B93A7 0 4px, #C9CDD9 4px 8px)" };
-  return (
-    <div className="confidence-card">
-      <div className="confidence-card__title">
-        <Gauge size={13} /> 예측 신뢰도
-      </div>
-      <div className="confidence-card__num" style={{ color: textColor }}>
-        {confidence}
-        <span>%</span>
-      </div>
-      <div className="confidence-bar">
-        <div className="confidence-bar__fill" style={{ width: `${confidence}%`, ...fillStyle }} />
-      </div>
-      <div className="confidence-card__tier" style={{ color: textColor }}>
-        신뢰도 {tier}
-        {confidence < 60 && <div>직접 확인 권장</div>}
-      </div>
-    </div>
-  );
+// 판단 불가(미판정) 건은 안전 판정이 아니라서, 담당자가 직접 확인하도록 같은 문구로 표시합니다.
+const REVIEW_LABEL = "담당자 확인 요망";
+function ReviewBadge() {
+  return <span className="review-badge">{REVIEW_LABEL}</span>;
 }
 
 function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
@@ -481,6 +461,7 @@ function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
   const { color } = LEVELS[level];
   const hits = session.isReal ? topContributors(session, 1) : [];
   const hitCount = session.isReal ? [...session.network_reasons, ...session.prompt_reasons].filter(isNotable).length : 0;
+  const when = typeof session.connectedAt === "string" ? session.connectedAt.replace(/^\d{4}\.\s*/, "") : session.connectedAt; // 연도는 줄여 한 줄에 담습니다
   return (
     <button
       className={`session-row ${active ? "session-row--active" : ""} ${flashing ? "session-row--flash" : ""}`}
@@ -491,23 +472,25 @@ function SessionRow({ session, active, flashing, onClick, onHover, onLeave }) {
     >
       <span className="session-row__dot" style={{ background: color }} />
       <div className="session-row__main">
-        <span className="session-row__user">{session.user}</span>
-        <span className="session-row__meta session-row__id" title={session.sessionId ?? session.id}>{session.sessionId ?? session.id}</span>
-        <span className="session-row__meta">{session.connectedAt}</span>
-        {hits.length > 0 && (
-          <span className="session-row__find" style={{ color: levelText(viewStatus(hits[0])) }}>
-            탐지 {hits[0].code} {hits[0].label.replace(/\s*·\s*\d+분 집계$/, "")}{hitCount > 1 ? ` 외 ${hitCount - 1}건` : ""}
+        <div className="session-row__top">
+          <span className="session-row__user">{session.user}</span>
+          <span className="session-row__meta">{when}</span>
+        </div>
+        {(hits.length > 0 || level === "pending") && (
+          <span className="session-row__find" style={{ color: hits.length > 0 ? levelText(viewStatus(hits[0])) : undefined }}>
+            {level === "pending" && <b className="session-row__review">{REVIEW_LABEL}</b>}
+            {level === "pending" && hits.length > 0 && " · "}
+            {hits.length > 0 && <>{hits[0].code} {hits[0].label.replace(/\s*·\s*\d+분 집계$/, "")}{hitCount > 1 ? ` 외 ${hitCount - 1}건` : ""}</>}
           </span>
         )}
       </div>
-      <span className="session-row__score" style={{ color, transition: "color 0.6s ease" }}>{session.score != null ? formatScore(session.score) : LEVELS[level].label}</span>
-      <ChevronRight size={16} color="#B7BAC3" />
+      <span className="session-row__score" style={{ color: levelText(level), transition: "color 0.6s ease" }}>{session.score != null ? formatScore(session.score) : LEVELS[level].label}</span>
     </button>
   );
 }
 
 const TOOLTIP_W = 250;
-const TOOLTIP_H_EST = 130;
+const TOOLTIP_H_EST = 170;
 const EDGE_MARGIN = 12;
 
 function HoverTooltip({ session, pos }) {
@@ -529,7 +512,7 @@ function HoverTooltip({ session, pos }) {
         <span className="hover-tooltip__badge" style={{ color: levelText(level), borderColor: LEVELS[level].color }}>
           {LEVELS[level].label}
         </span>
-        <span className="hover-tooltip__conf">신뢰도 {session.confidence == null ? "미제공" : `${session.confidence}%`}</span>
+        {level === "pending" && <ReviewBadge />}
       </div>
       {net && (
         <div className="hover-tooltip__row">
@@ -541,6 +524,7 @@ function HoverTooltip({ session, pos }) {
           <MessageSquareWarning size={12} /> [{pr.code}] {pr.label}: {pr.detail}
         </div>
       )}
+      <div className="hover-tooltip__id">구간 ID {session.sessionId ?? session.id}</div>
     </div>
   );
 }
@@ -660,55 +644,116 @@ function SkeletonDetail() {
 /* ───────────────────────── 메인 ───────────────────────── */
 
 // 5분 구간의 프롬프트 점수 목록과 네트워크 점수 구성. 서버 값만 표시하고 없는 값은 미제공/미판정으로 둡니다.
-function CompanyBreakdown({ event }) {
+// "AI 탈취 1, 프롬프트 인젝션 2" 같은 반복 횟수 문구를 작은 칩으로 보여 줍니다(2회 이상은 노랗게).
+function OccurrenceChips({ text }) {
+  if (text == null) return <span className="c-muted">—</span>;
+  if (text === "없음") return <span className="c-muted">없음</span>;
+  if (text === "집계 실패") return <span className="rep-chip rep-chip--warn">집계 실패</span>;
+  return (
+    <div className="rep-chips">
+      {text.split(", ").map((part) => {
+        const m = part.match(/^(.*) (\d+)$/);
+        return (
+          <span key={part} className={`rep-chip ${m && Number(m[2]) > 1 ? "is-repeat" : ""}`}>
+            {m ? m[1] : part}{m && <b>{m[2]}</b>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// 잘려 보이는 ID 위에 마우스를 올리면 전체 값이 바로 뜹니다(브라우저 기본 title은 느리고 표 안에서는 안 뜨기도 함). 클릭하면 복사합니다.
+function FullId({ id, as: Tag = "span", className = "", children }) {
+  const [tip, setTip] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const show = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTip({ x: Math.max(8, Math.min(rect.left, window.innerWidth - 528)), y: rect.top });
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch { /* 복사 권한이 없으면 조용히 넘어갑니다 */ }
+  };
+  return (
+    <Tag className={`fullid ${className}`} onMouseEnter={show} onMouseLeave={() => { setTip(null); setCopied(false); }} onClick={copy}>
+      {children ?? id}
+      {tip && <span className="id-tip" role="tooltip" style={{ left: tip.x, top: tip.y }}>{id}<em>{copied ? "복사했어요" : "클릭하면 복사"}</em></span>}
+    </Tag>
+  );
+}
+
+// 긴 capture ID는 서로 다른 뒷부분만 보여 줍니다(전체는 마우스를 올리면 나옵니다).
+const shortCaptureId = (id) => (id.length > 24 ? `…${id.slice(-12)}` : id);
+
+// 점수가 있는 프롬프트(또는 반영 행·미판정·오류)만 먼저 보이고, 0점 정상 행은 접어 둡니다.
+const showsFirst = (r) => r.isMax || r.status !== "complete" || (r.score ?? 0) > 0;
+
+function CompanyBreakdown({ event, promptEvidence, networkEvidence }) {
+  const [showRest, setShowRest] = useState(false);
   const rows = promptScoreRows(event);
   const network = networkBreakdownParts(event.network_score_breakdown);
   const statusLabel = { complete: "완료", pending: "미판정", error: "오류" };
   const hasOccurrence = rows.some((r) => r.occurrence != null);
+  const showUser = rows.some((r) => r.userId !== event.user); // 모두 같은 사용자면 열을 숨깁니다
+  const showState = rows.some((r) => r.status !== "complete"); // 모두 완료면 열을 숨기고 위 건수로 갈음합니다
+  const shownRows = showRest ? rows : rows.filter(showsFirst);
+  const hiddenCount = rows.length - rows.filter(showsFirst).length;
   return (
     <div className="company-breakdown">
-      <section className="company-breakdown__col">
+      <section className="company-breakdown__col company-breakdown__col--accent" style={{ "--line-accent": "#7A4FB5" }}>
         <h4>프롬프트 분석 {event.capture_count ?? 0}건 · 최고 점수만 반영</h4>
         <p className="company-breakdown__counts">
           완료 {event.prompt_complete_count ?? 0} · 미판정 {event.prompt_missing_count ?? 0} · 오류 {event.prompt_error_count ?? 0}
-          {" "}· 최고 {formatScore(event.prompt_max_score)}/60
         </p>
-        <p className="company-breakdown__note">{PROMPT_MAX_NOTE} 미판정·오류는 0점으로 바꾸지 않으며, 하나라도 있으면 통합 점수는 미판정입니다.</p>
+        <details className="fold"><summary>반영 방식 보기</summary><p className="company-breakdown__note">{PROMPT_MAX_NOTE} 미판정·오류는 0점으로 바꾸지 않으며, 하나라도 있으면 통합 점수는 미판정입니다.</p></details>
         {rows.length > 0 ? (
           <div className="company-breakdown__table">
             <table>
-              <thead><tr><th>capture ID</th><th>사용자</th><th>점수</th><th>상태</th>{hasOccurrence && <th title="문장별 반복 횟수(점수 반영, 라벨당 최대 3회)">반복</th>}</tr></thead>
+              <thead><tr><th className="c-idcol">capture ID</th>{showUser && <th className="c-user">사용자</th>}<th className="c-num">점수</th>{showState && <th className="c-state">상태</th>}{hasOccurrence && <th className="c-rep" title="문장별 반복 횟수(점수 반영, 라벨당 최대 3회)">반복</th>}</tr></thead>
               <tbody>
-                {rows.map((r) => (
+                {shownRows.map((r) => (
                   <tr key={r.captureId} className={r.isMax ? "is-max" : ""}>
-                    <td title={r.captureId}>{r.captureId}{r.isMax && <b> · 반영</b>}</td>
-                    <td>{r.userId}</td>
-                    <td>{r.score == null ? "—" : `${formatScore(r.score)}/60`}</td>
-                    <td>{statusLabel[r.status]}</td>
-                    {hasOccurrence && <td>{r.occurrence ?? "—"}</td>}
+                    <td className="c-id"><div className="c-id__wrap"><FullId id={r.captureId} className="c-id__text">{shortCaptureId(r.captureId)}</FullId>{r.isMax && <b className="c-tag">반영</b>}</div></td>
+                    {showUser && <td className="c-user">{r.userId}</td>}
+                    <td className="c-num">{r.score == null ? "—" : `${formatScore(r.score)}/60`}</td>
+                    {showState && <td className="c-state">{statusLabel[r.status]}</td>}
+                    {hasOccurrence && <td className="c-rep"><OccurrenceChips text={r.occurrence} /></td>}
                   </tr>
                 ))}
               </tbody>
             </table>
+            {shownRows.length === 0 && <p className="company-breakdown__note">점수가 있는 프롬프트가 없습니다.</p>}
           </div>
         ) : <p className="company-breakdown__note">개별 프롬프트 점수 목록이 없는 이전 구간입니다.</p>}
+        {hiddenCount > 0 && (
+          <button className="collapse-btn" onClick={() => setShowRest((v) => !v)} aria-expanded={showRest}>
+            <ChevronDown size={13} style={{ transform: showRest ? "rotate(180deg)" : "none" }} />
+            {showRest ? "점수 없는 프롬프트 접기" : `나머지 ${hiddenCount}건 보기 · 점수 0`}
+          </button>
+        )}
+        {promptEvidence}
       </section>
-      <section className="company-breakdown__col">
-        <h4>네트워크 점수 구성{network?.threat ? ` · ${network.threat} ${network.threatName}` : ""}</h4>
+      <section className="company-breakdown__col company-breakdown__col--accent" style={{ "--line-accent": "#33429A" }}>
+        <h4>네트워크 점수 구성</h4>
         {network ? (
           <>
-            <p className="company-breakdown__formula">{networkBreakdownText(event.network_score_breakdown)}</p>
-            <ul>
+            <ul className="breakdown-list">
               {network.parts.map((p) => (
                 <li key={p.key}><span>{p.label}</span><b>{p.value == null ? "미제공" : formatScore(p.value)}</b></li>
               ))}
+              <li className="is-total"><span>네트워크 점수</span><b>{formatScore(network.total)}</b></li>
             </ul>
-            <p className="company-breakdown__note">
+            <details className="fold"><summary>산정 방식 보기</summary><p className="company-breakdown__note">
               네트워크 모델 보고서의 값을 그대로 표시합니다(합계는 반올림·상한 100 적용). 반영 점수 = {formatScore(network.total)} × 0.4 = {formatScore(event.network_contribution)}/40.
               반복 가산점 '미제공'은 현재 모델 설정에서 반복 가산을 쓰지 않는다는 뜻입니다.
-            </p>
+            </p></details>
           </>
         ) : <p className="company-breakdown__note">네트워크 점수 구성 정보가 없습니다(분석 대기 또는 이전 버전 결과).</p>}
+        {networkEvidence}
       </section>
     </div>
   );
@@ -722,6 +767,7 @@ function WindowSummaryCard({ event }) {
   const day = event.startedAtMs == null ? "" : new Date(event.startedAtMs).toLocaleDateString("ko-KR");
   const legacy = event.scope === "company";
   const capture = event.prompt_source_capture_id;
+  const showSource = !!capture && promptScoreRows(event).length === 0; // 표의 '반영' 행과 같은 정보라 표가 없을 때만 보여 줍니다
   return (
     <div className="window-card" role="note">
       <div className="window-card__head">
@@ -729,7 +775,7 @@ function WindowSummaryCard({ event }) {
           {event.phase === "open" ? "집계 중 · 잠정" : "종료된 구간"}
         </span>
         <span className="window-card__when">{day} {fmtHm(event.startedAtMs)} ~ {fmtHm(event.endedAtMs)}</span>
-        <span className="window-card__who">{legacy ? "회사 전체(이전 버전)" : `${event.user} · ${event.device_id}`}</span>
+        {legacy && <span className="window-card__who">회사 전체(이전 버전)</span>}
       </div>
 
       <div className="window-card__formula" aria-label="통합 점수 산식">
@@ -748,21 +794,35 @@ function WindowSummaryCard({ event }) {
         <div className="score-tile score-tile--total" style={{ borderColor: LEVELS[level].color }}>
           <span className="score-tile__label">통합 점수</span>
           <span className="score-tile__value" style={{ color: levelText(level) }}>{formatScore(event.score)}<small>/100</small></span>
-          <span className="score-tile__sub" style={{ color: levelText(level), fontWeight: 700 }}>{LEVELS[level].label}</span>
+          <span className="score-tile__sub" style={{ color: levelText(level), fontWeight: 700 }}>{LEVELS[level].label}{level === "pending" && <ReviewBadge />}</span>
         </div>
       </div>
 
-      {capture && (
-        <div className="window-card__source">
-          <span>최고 점수 근거</span>
-          <code title={capture}>{capture}</code>
-          {event.prompt_source_user_id && event.prompt_source_user_id !== event.user && <span className="window-card__muted">사용자 {event.prompt_source_user_id}</span>}
+      {event.override && (
+        <div className="override-note" role="note">
+          <ShieldAlert size={14} color={LEVELS.danger.color} />
+          <span>
+            <b>강제 위험 규칙 적용</b> · 합계 점수와 관계없이 위험으로 판정됨
+            {event.overrideReasons?.length > 0 && <> ({event.overrideReasons.join(" / ")})</>}
+          </span>
         </div>
       )}
-      <OccurrenceRow event={event} />
+
+      {(showSource || occurrenceSummary(event)) && (
+        <div className="window-card__extra">
+          {showSource && (
+            <div className="window-card__source">
+              <span>최고 점수 근거</span>
+              <FullId as="code" id={capture} />
+              {event.prompt_source_user_id && event.prompt_source_user_id !== event.user && <span className="window-card__muted">사용자 {event.prompt_source_user_id}</span>}
+            </div>
+          )}
+          <OccurrenceRow event={event} />
+        </div>
+      )}
       {event.fusion_status !== "complete" && <p className="window-card__reason">{event.reason}</p>}
 
-      <details className="window-card__notes">
+      <details className="window-card__notes fold">
         <summary>검토 우선순위용 지표이며 위반 확정이 아닙니다 · 판정 기준 보기</summary>
         <ul>
           {SCOPE_NOTE.map((line) => <li key={line}>{line}</li>)}
@@ -815,31 +875,42 @@ function SameSlotPanel({ selected, events, isMock, onSelect }) {
   const summary = sameSlotSummary(rows ?? events, selected);
   if (!summary) return null;
   const { windows, counts, pending, error, userCount } = summary;
+  const tiles = [
+    ...["danger", "warning", "caution", "normal"].map((g) => ({ key: g, label: LEVELS[g].label, value: counts[g], dot: LEVELS[g].color, color: levelText(g) })),
+    { key: "pending", label: "미판정", value: pending, dot: LEVELS.pending.color, color: LEVELS.pending.color },
+    ...(error ? [{ key: "error", label: "오류", value: error, dot: LEVELS.error.color, color: LEVELS.error.color }] : []),
+  ];
   return (
     <div className="company-breakdown company-breakdown--single">
       <section className="company-breakdown__col">
         <h4>같은 시간대 사용자 구간 · {userCount}명</h4>
-        <p className="company-breakdown__counts">
-          {["danger", "warning", "caution", "normal"].map((g) => `${LEVELS[g].label} ${counts[g]}`).join(" · ")}
-          {` · 미판정 ${pending}`}{error ? ` · 오류 ${error}` : ""}
-        </p>
-        <div className="company-breakdown__table">
-          <table>
-            <thead><tr><th>사용자 · 단말</th><th>등급</th><th>통합 점수</th><th>프롬프트 최고</th></tr></thead>
-            <tbody>
-              {windows.map((w) => (
-                <tr key={w.id} className={w.id === selected.id ? "is-max" : "is-link"} onClick={() => onSelect(w)}
-                  title="클릭하면 이 사용자 구간을 엽니다">
-                  <td>{w.user} · {w.device_id}{w.id === selected.id && <b> · 현재</b>}</td>
-                  <td style={{ color: levelText(eventLevel(w)), fontWeight: 600 }}>{LEVELS[eventLevel(w)].label}</td>
-                  <td>{formatScore(w.score)}</td>
-                  <td>{w.prompt_max_score == null ? "—" : `${formatScore(w.prompt_max_score)}/60`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="slot-layout">
+          <div className="company-breakdown__table slot-layout__table">
+            <table>
+              <thead><tr><th>사용자 · 단말</th><th className="c-grade">등급</th><th className="c-num">통합 점수</th><th className="c-num">프롬프트 최고</th></tr></thead>
+              <tbody>
+                {windows.map((w) => (
+                  <tr key={w.id} className={w.id === selected.id ? "is-max" : "is-link"} onClick={() => onSelect(w)}
+                    title="클릭하면 이 사용자 구간을 엽니다">
+                    <td>{w.user} <span className="c-sub">{w.device_id}</span>{w.id === selected.id && <b className="c-tag">현재</b>}</td>
+                    <td className="c-grade" style={{ color: levelText(eventLevel(w)) }}><i style={{ background: LEVELS[eventLevel(w)].color }} />{LEVELS[eventLevel(w)].label}</td>
+                    <td className="c-num">{formatScore(w.score)}</td>
+                    <td className="c-num">{w.prompt_max_score == null ? "—" : `${formatScore(w.prompt_max_score)}/60`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="slot-counts" role="group" aria-label="등급별 사용자 수">
+            {tiles.map((t) => (
+              <div key={t.key} className={`slot-count ${t.value ? "" : "slot-count--zero"}`}>
+                <span className="slot-count__num" style={{ color: t.color }}>{t.value}</span>
+                <span className="slot-count__label"><i style={{ background: t.dot }} />{t.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        <p className="company-breakdown__note">{rows ? "서버 기준 같은 시간대 전체 사용자입니다." : "화면에 불러온 구간 기준입니다."} 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.</p>
+        <details className="fold"><summary>집계 기준 보기</summary><p className="company-breakdown__note">{rows ? "서버 기준 같은 시간대 전체 사용자입니다." : "화면에 불러온 구간 기준입니다."} 등급 수만 세며 회사 점수를 합산·평균하지 않습니다. 미판정은 정상으로 세지 않습니다.</p></details>
       </section>
     </div>
   );
@@ -847,6 +918,7 @@ function SameSlotPanel({ selected, events, isMock, onSelect }) {
 
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
+  const [testerOpen, setTesterOpen] = useState(false); // 프롬프트 직접 테스트 패널
   const [view, setView] = useState(USE_MOCK ? "detail" : "overview"); // overview: 기본 그래프, detail: 구간 상세 분석
   const [dateFilter, setDateFilter] = useState(""); // 한국 시간 YYYY-MM-DD, 빈 값은 전체 날짜
   const [userFilter, setUserFilter] = useState(""); // 빈 값은 전체 사용자
@@ -1021,6 +1093,7 @@ export default function RiskDashboard() {
     ex?.status === "done" &&
     selected &&
     (selected.revision !== ex.revision || selected.score !== ex.atScore || eventLevel(selected) !== ex.atLevel);
+  const exLines = ex?.status === "done" ? summaryLines(ex.text) : [];
 
   const statusText =
     status === "error"
@@ -1032,66 +1105,104 @@ export default function RiskDashboard() {
       : "갱신 일시정지됨";
   const dotClass = status === "error" ? "live-dot--err" : live && status === "ok" ? "" : "live-dot--off";
 
+  const hasWindowCard = !!selected && (selected.scope === "company" || selected.scope === "user_device"); // 구간 요약 카드가 점수·시간을 이미 보여 줍니다
+  const trendPoints = selected ? (history[selected.id] || [selected.score]).filter((v) => v != null).length : 0;
+  const evidenceGroups = selected ? {
+    net: (
+      <EvidenceGroup
+        embedded={hasWindowCard}
+        title={hasWindowCard ? "탐지 항목" : selected.scope === "company" ? "회사 전체 네트워크 · 5분 집계 (N1~N6, 이전 버전)" : "이 사용자·단말 네트워크 · 5분 집계 (N1~N6)"}
+        icon={hasWindowCard ? null : <Network size={15} color="#5F6372" />}
+        items={selected.network_reasons}
+        accent="#33429A"
+        note="항목 점수는 모델 클래스 확률(%)이며 통합 기여도가 아닙니다."
+        expanded={openSafe.net}
+        onToggle={() => setOpenSafe((s) => ({ ...s, net: !s.net }))}
+      />
+    ),
+    prompt: (
+      <EvidenceGroup
+        embedded={hasWindowCard}
+        title={hasWindowCard ? "탐지 항목" : "구간 내 최고 점수 프롬프트 분석"}
+        icon={hasWindowCard ? null : <MessageSquareWarning size={15} color="#5F6372" />}
+        items={selected.prompt_reasons}
+        accent="#7A4FB5"
+        note="확률은 라벨 분류 결과이며 위험도 점수가 아닙니다. 항목별 판단 근거는 제공되지 않습니다. 미탐지는 안전 판정이 아닙니다."
+        expanded={openSafe.prompt}
+        onToggle={() => setOpenSafe((s) => ({ ...s, prompt: !s.prompt }))}
+      />
+    ),
+  } : null;
+  const showTrend = !!selected && (selected.score != null || !selected.isReal) && trendPoints > 1;
+
   return (
     <div className="dash">
       <style>{`
+        /* ───────── 디자인 토큰 ───────── */
         .dash {
-          --bg: #F4F5F8;
+          --bg: #F6F7F9;
           --panel: #FFFFFF;
-          --tint: #F0F1F6;
-          --border: #E1E3EA;
-          --text: #191B22;
-          --text-dim: #5F6372;
+          --tint: #F3F4F7;
+          --border: #E7E9EE;
+          --border-strong: #D5D8E0;
+          --text: #1A1D26;
+          --text-dim: #4B5060;
+          --text-mute: #6E7385;
           --accent: #33429A;
-          --accent-soft: #ECEEFA;
+          --accent-soft: #EEF0FA;
+          --radius: 12px;
+          --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
           position: relative;
-          font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', -apple-system, sans-serif;
-          font-size: 13px;
+          font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", -apple-system, "Malgun Gothic", sans-serif;
+          font-size: 14px;
+          line-height: 1.5;
+          letter-spacing: -0.005em;
+          -webkit-font-smoothing: antialiased;
+          font-variant-numeric: tabular-nums;
           background: var(--bg);
           color: var(--text);
-          border-radius: 14px;
-          border: 1px solid var(--border);
-          overflow: hidden;
+          width: 100%;
           box-sizing: border-box;
+          overflow: hidden;
           height: 100vh; height: 100dvh; /* 화면 높이에 맞추고, 남는 공간을 본문이 채워 좌우가 각각 스크롤됩니다 */
           min-height: 560px;
           display: flex;
           flex-direction: column;
-          box-shadow: 0 1px 2px rgba(20,22,30,0.04);
         }
         .dash * { box-sizing: border-box; }
         .dash button, .dash input, .dash select { font-family: inherit; }
-        .dash button:focus-visible, .dash input:focus-visible, .dash select:focus-visible {
+        .dash button:focus-visible, .dash input:focus-visible, .dash select:focus-visible, .dash summary:focus-visible {
           outline: 2px solid var(--accent);
           outline-offset: 2px;
         }
-        .dash__topline {
-          height: 3px;
-          width: 100%;
-          background: linear-gradient(90deg, var(--accent) 0%, #6B7FE0 45%, #9FB0EE 100%);
-          flex-shrink: 0;
-        }
+        .dash h1, .dash h4 { margin: 0; }
+        .dash code { font-family: var(--mono); }
 
-        .toast-stack { position: absolute; top: 16px; right: 16px; z-index: 40; display: flex; flex-direction: column; gap: 8px; width: 320px; }
+        /* ───────── 알림 ───────── */
+        .toast-stack { position: absolute; top: 14px; right: 16px; z-index: 40; display: flex; flex-direction: column; gap: 8px; width: 320px; }
         .toast {
           display: flex; align-items: center; gap: 9px;
           background: #fff; border: 1px solid var(--border); border-left: 3px solid;
-          border-radius: 8px; padding: 11px 13px; font-size: 12.5px; color: var(--text);
+          border-radius: 10px; padding: 11px 13px; font-size: 13px; color: var(--text);
           box-shadow: 0 10px 26px rgba(20,22,30,0.12); animation: toast-in .25s ease;
         }
         @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
         .toast__text { flex: 1; }
         .toast__close { background: transparent; border: none; color: var(--text-dim); cursor: pointer; display: flex; }
 
+        /* ───────── 헤더: 한 줄(로고 · 탭 · 요약 · 버튼) ───────── */
         .dash-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 18px 24px 16px; border-bottom: 1px solid var(--border); gap: 18px; flex-wrap: wrap;
+          display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap;
+          padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
         }
-        .dash-header__title { display: flex; align-items: center; gap: 11px; font-size: 17px; font-weight: 700; letter-spacing: -0.1px; }
-        .dash-header__icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .dash-header__sub { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 400; color: var(--text-dim); margin-top: 3px; flex-wrap: wrap; }
-        .demo-chip { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; letter-spacing: .03em; }
-        .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #137D57; display: inline-block; animation: pulse 1.6s infinite; }
+        .dash-header__title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .dash-header__icon { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .dash-header__text { min-width: 0; }
+        .dash-header__text h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; white-space: nowrap; }
+        .dash-header__sub { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-mute); margin-top: 1px; flex-wrap: wrap; }
+        .dash-header__count { padding-left: 6px; margin-left: 2px; border-left: 1px solid var(--border-strong); }
+        .demo-chip { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; letter-spacing: .03em; }
+        .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #137D57; display: inline-block; animation: pulse 1.6s infinite; flex-shrink: 0; }
         .live-dot--off { background: #B7BAC3; animation: none; }
         .live-dot--err { background: #C6362A; animation: none; }
         @keyframes pulse {
@@ -1099,259 +1210,271 @@ export default function RiskDashboard() {
           70% { box-shadow: 0 0 0 6px rgba(19,125,87,0); }
           100% { box-shadow: 0 0 0 0 rgba(19,125,87,0); }
         }
-        .dash-header__right { display: flex; align-items: center; gap: 14px; }
-        .header-stats { display: flex; flex-direction: column; gap: 6px; min-width: 190px; }
-        .header-stats__row { display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12.5px; }
-        .level-bar { display: flex; width: 100%; height: 6px; border-radius: 4px; overflow: hidden; background: var(--tint); }
+        .dash-header__right { display: flex; align-items: center; gap: 12px 16px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+        .dash-header__actions { display: flex; align-items: center; gap: 8px; }
+        .header-stats { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+        .header-stats__row { display: flex; gap: 10px; font-size: 12.5px; color: var(--text-dim); white-space: nowrap; }
+        .stat { display: inline-flex; align-items: center; gap: 5px; }
+        .stat i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+        .stat b { color: var(--text); font-weight: 650; }
+        .stat--zero { opacity: .45; }
+        .stat--gone { display: none; }
+        .level-bar { display: flex; width: 100%; height: 4px; border-radius: 4px; overflow: hidden; background: var(--tint); }
         .level-bar__seg { height: 100%; }
         .ghost-btn {
-          display: flex; align-items: center; gap: 6px; background: var(--panel);
-          border: 1px solid var(--border); border-radius: 7px; padding: 7px 12px;
-          font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+          display: inline-flex; align-items: center; gap: 6px; background: var(--panel);
+          border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px;
+          font-size: 13px; color: var(--text-dim); cursor: pointer; white-space: nowrap;
         }
-        .ghost-btn:hover { color: var(--text); border-color: #C7CAD4; }
+        .ghost-btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--tint); }
+        .ghost-btn.is-on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+        .chat-link { display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; white-space: nowrap; background: var(--panel); }
+        .chat-link:hover { background: var(--accent-soft); border-color: #CBD0EE; }
+
+        /* ───────── 탭(분할 버튼) ───────── */
+        .view-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--tint); border-radius: 10px; }
+        .view-tabs button { border: none; background: transparent; padding: 6px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-radius: 8px; white-space: nowrap; }
+        .view-tabs button:hover { color: var(--text); }
+        .view-tabs button.is-on { background: var(--panel); color: var(--accent); box-shadow: 0 1px 2px rgba(20,22,30,.08); }
 
         .stale-banner {
           display: flex; align-items: center; gap: 9px; padding: 9px 24px;
-          background: #FBEDEB; border-bottom: 1px solid #EFC1BC; color: #8E2A20; font-size: 12.5px;
+          background: #FBEDEB; border-bottom: 1px solid #EFC1BC; color: #8E2A20; font-size: 13px;
         }
-        .stale-banner button { margin-left: auto; background: #fff; border: 1px solid #EFC1BC; color: #8E2A20; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+        .stale-banner button { margin-left: auto; background: #fff; border: 1px solid #EFC1BC; color: #8E2A20; border-radius: 6px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
 
         /* 본문은 남는 높이를 채우고, 왼쪽 목록·오른쪽 상세가 각각 스크롤됩니다(페이지 전체가 같이 스크롤되지 않게). */
         .dash > :not(.dash-body) { flex-shrink: 0; }
         .dash-body { display: flex; flex: 1; min-height: 0; }
-        .tester-fold { border-bottom: 1px solid var(--border); background: #fafbff; }
-        .tester-fold > summary { cursor: pointer; padding: 9px 24px; font-size: 12.5px; font-weight: 500; color: var(--accent); }
-        .tester-fold[open] > summary { border-bottom: 1px dashed var(--border); }
-        .tester-fold .prompt-tester { border-bottom: none; max-height: 45vh; overflow-y: auto; }
+        .tester-panel { border-bottom: 1px solid var(--border); background: var(--panel); max-height: 50vh; overflow-y: auto; }
 
-        .side { width: 320px; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #FBFBFD; }
-        .filter-bar { flex-shrink: 0; padding: 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
-        .search-box { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; }
-        .search-box input { background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; width: 100%; }
+        /* ───────── 왼쪽 목록 ───────── */
+        .side { width: 304px; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--panel); }
+        .filter-bar { flex-shrink: 0; padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+        .scope-filters { display: flex; gap: 6px; }
+        .scope-filters select { flex: 1; min-width: 0; height: 32px; padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; text-overflow: ellipsis; }
+        .search-box { display: flex; align-items: center; gap: 7px; background: var(--tint); border: 1px solid transparent; border-radius: 8px; height: 32px; padding: 0 10px; }
+        .search-box input { background: transparent; border: none; outline: none; color: var(--text); font-size: 13.5px; width: 100%; }
         .search-box input:focus-visible { outline: none; }
-        .search-box:focus-within { border-color: var(--accent); }
-        .filter-pills { display: flex; gap: 6px; }
-        .filter-pill { flex: 1; padding: 7px 0; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); font-size: 12.5px; cursor: pointer; }
+        .search-box:focus-within { border-color: var(--accent); background: var(--panel); }
+        .filter-pills { display: flex; gap: 4px; }
+        .filter-pill { flex: 1; padding: 4px 0; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+        .filter-pill:hover { background: var(--tint); }
         .filter-pill--active { background: var(--accent); color: #fff; border-color: var(--accent); }
-        .tool-row { display: flex; gap: 8px; align-items: stretch; }
+        .tool-row { display: flex; gap: 6px; align-items: stretch; }
         .tool-row .sort-select { flex: 1; min-width: 0; }
-        .tool-row .export-btn { flex-shrink: 0; white-space: nowrap; padding: 7px 11px; }
-        .sort-select { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; font-size: 12.5px; color: var(--text-dim); }
-        .sort-select select { background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; flex: 1; }
-        .export-btn { display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 9px 0; font-size: 12.5px; color: var(--accent); cursor: pointer; font-weight: 500; }
+        .tool-row .export-btn { flex-shrink: 0; white-space: nowrap; }
+        .sort-select { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; height: 30px; padding: 0 8px; font-size: 13px; color: var(--text-dim); }
+        .sort-select select { background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; flex: 1; min-width: 0; }
+        .export-btn { display: flex; align-items: center; justify-content: center; gap: 5px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; height: 30px; padding: 0 10px; font-size: 13px; color: var(--accent); cursor: pointer; font-weight: 500; }
         .export-btn:hover { background: var(--accent-soft); }
+        .export-btn:disabled { color: var(--text-mute); cursor: default; background: var(--panel); }
 
-        .session-list { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
-        .session-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 9px; padding: 11px 12px; cursor: pointer; color: var(--text); }
-        .session-row:hover { background: var(--panel); border-color: var(--border); }
-        .session-row--active { background: var(--panel); border-color: var(--accent); box-shadow: 0 1px 3px rgba(20,22,30,.06); }
+        .session-list { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+        .session-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 9px 12px; cursor: pointer; color: var(--text); }
+        .session-row:hover { background: var(--tint); }
+        .session-row--active, .session-row--active:hover { background: var(--accent-soft); border-color: #CBD0EE; }
         .session-row--flash { animation: flash-row .45s ease 3; }
         @keyframes flash-row { 0%, 100% { background: transparent; border-color: transparent; } 50% { background: #FBE8E6; border-color: #EFC1BC; } }
         .session-row__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .session-row__main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-        .session-row__user { font-size: 13.5px; font-weight: 500; }
-        .session-row__meta { font-size: 11.5px; color: var(--text-dim); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
-        .session-row__id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .session-row__find { margin-top: 3px; font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .session-row__score { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14.5px; font-weight: 600; }
+        .session-row__main { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+        .session-row__top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+        .session-row__user { font-size: 14px; font-weight: 600; white-space: nowrap; }
+        .session-row__meta { font-size: 12px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .session-row__find { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-row__review { color: var(--text); font-weight: 700; }
+        .session-row__score { font-size: 15px; font-weight: 700; min-width: 30px; text-align: right; }
 
         .list-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; color: var(--text-dim); text-align: center; }
-        .list-empty button { margin-top: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 7px 14px; font-size: 12.5px; color: var(--accent); cursor: pointer; }
+        .list-empty button { margin-top: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; font-size: 13px; color: var(--accent); cursor: pointer; }
+        .list-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 6px; font-size: 12.5px; color: var(--text-dim); text-align: center; }
+        .list-more button { background: var(--tint); border: 1px solid var(--border); border-radius: 8px; color: var(--accent); font-size: 13px; padding: 6px 14px; cursor: pointer; }
+        .list-more button:disabled { opacity: .6; cursor: default; }
 
-        .hover-tooltip { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px; font-size: 12px; color: var(--text); pointer-events: none; box-shadow: 0 10px 28px rgba(20,22,30,.14); }
-        .hover-tooltip__head { display: flex; align-items: center; gap: 8px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 700; font-size: 14px; margin-bottom: 6px; }
-        .hover-tooltip__badge { font-size: 11px; border: 1px solid; border-radius: 20px; padding: 1px 8px; font-family: 'Noto Sans KR', sans-serif; font-weight: 500; }
-        .hover-tooltip__conf { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-dim); font-family: 'Noto Sans KR', sans-serif; }
+        .hover-tooltip { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; font-size: 12.5px; color: var(--text); pointer-events: none; box-shadow: 0 10px 28px rgba(20,22,30,.14); }
+        .hover-tooltip__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+        .hover-tooltip__head > span { white-space: nowrap; }
+        .hover-tooltip__badge { font-size: 11.5px; border: 1px solid; border-radius: 20px; padding: 1px 8px; font-weight: 500; }
+        .hover-tooltip__id { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--tint); font-family: var(--mono); font-size: 11px; color: var(--text-mute); overflow-wrap: anywhere; line-height: 1.45; }
         .hover-tooltip__row { display: flex; align-items: flex-start; gap: 5px; color: var(--text-dim); margin-top: 4px; line-height: 1.45; }
 
-        .detail { flex: 1; padding: 24px 28px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; min-width: 0; }
-        .detail-meta { display: flex; gap: 22px; margin-bottom: 22px; flex-wrap: wrap; }
-        .detail-meta__item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); }
-        .detail-meta__item b { color: var(--text); font-weight: 600; }
+        /* ───────── 오른쪽 상세 ───────── */
+        .detail { flex: 1; padding: 20px 28px 32px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+        .detail > * { flex-shrink: 0; }
+        .detail-meta { display: flex; align-items: center; gap: 6px 20px; flex-wrap: wrap; font-size: 13.5px; }
+        .detail-meta__item { display: flex; align-items: center; gap: 6px; color: var(--text-mute); min-width: 0; }
+        .detail-meta__item b { color: var(--text); font-weight: 650; font-size: 14px; }
+        .detail-meta__dim { color: var(--text-dim); }
+        .detail-meta__id code { font-size: 12.5px; color: var(--text-dim); background: var(--tint); border-radius: 6px; padding: 1px 7px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .detail-main { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
-        .score-badge { position: relative; width: 140px; height: 140px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-bottom: 26px; }
+        .detail-main { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+        .score-badge { position: relative; width: 120px; height: 120px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; }
+        .score-badge svg { width: 120px; height: 120px; }
         .score-badge__center { position: absolute; display: flex; flex-direction: column; align-items: center; }
-        .score-badge__num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 36px; font-weight: 700; line-height: 1; }
-        .score-badge__unit { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-        .score-badge__label { position: absolute; bottom: -26px; font-size: 12.5px; border: 1px solid; border-radius: 20px; padding: 2px 13px; background: #fff; }
+        .score-badge__num { font-size: 32px; font-weight: 700; line-height: 1; }
+        .score-badge__unit { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+        .score-badge__label { position: absolute; bottom: -24px; font-size: 13px; border: 1px solid; border-radius: 20px; padding: 1px 13px; background: #fff; }
 
-        .trend-card { flex: 1; min-width: 240px; background: var(--tint); border-radius: 12px; padding: 14px 16px; }
+        .trend-card { flex: 1; min-width: 240px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; }
         .trend-card__title { font-size: 12.5px; color: var(--text-dim); font-weight: 500; margin-bottom: 2px; }
-
-        .confidence-card { width: 140px; flex-shrink: 0; background: var(--tint); border-radius: 12px; padding: 14px 14px 12px; display: flex; flex-direction: column; align-items: center; text-align: center; }
-        .confidence-card__title { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); font-weight: 500; margin-bottom: 6px; }
-        .confidence-card__num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 28px; font-weight: 700; line-height: 1; }
-        .confidence-card__num span { font-size: 14px; font-weight: 500; }
-        .confidence-bar { width: 100%; height: 6px; background: #E3E5EC; border-radius: 4px; overflow: hidden; margin: 10px 0 8px; }
-        .confidence-bar__fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
-        .override-note { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; padding: 9px 12px; border: 1px solid #C6362A; border-radius: 8px; background: #FDF2F1; color: #8F2A21; font-size: 12.5px; line-height: 1.5; }
+        .override-note { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border: 1px solid #E8B4AE; border-radius: 10px; background: #FDF4F3; color: #8F2A21; font-size: 13px; line-height: 1.5; }
         .override-note svg { flex-shrink: 0; margin-top: 2px; }
-        .confidence-card__tier { font-size: 12px; font-weight: 500; line-height: 1.45; }
+        .window-card .override-note { margin-top: 12px; }
 
-        .top-issues { margin-top: 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; background: var(--accent-soft); border-radius: 10px; }
-        .top-issues__title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--accent); }
-        .top-issues__none { font-size: 12.5px; color: var(--text-dim); }
-        .top-issues__chips { display: flex; gap: 8px; flex-wrap: wrap; }
-        .issue-chip { display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid; border-radius: 20px; padding: 4px 11px 4px 8px; font-size: 12.5px; font-weight: 500; }
-        .issue-chip b { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; }
-        .issue-chip__code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-dim); }
+        .top-issues { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+        .top-issues__title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; color: var(--text-dim); }
+        .top-issues__none { font-size: 13px; color: var(--text-mute); }
+        .top-issues__chips { display: flex; gap: 6px; flex-wrap: wrap; }
+        .issue-chip { display: flex; align-items: center; gap: 6px; background: var(--tint); border: 1px solid; border-radius: 20px; padding: 2px 11px 2px 8px; font-size: 13px; font-weight: 500; }
+        .issue-chip b { font-size: 12.5px; }
+        .issue-chip__code { font-family: var(--mono); font-size: 11.5px; color: var(--text-mute); }
 
-        .evidence-cols { display: flex; gap: 0; margin-top: 20px; border-top: 1px solid var(--border); }
-        .evidence-group { flex: 1; padding: 18px 20px; border-left: 3px solid; min-width: 0; }
-        .evidence-group:first-child { border-right: 1px solid var(--border); }
-        .evidence-group__head { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 14px; flex-wrap: wrap; }
-        .evidence-group__count { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-dim); }
-        .evidence-empty { font-size: 13px; color: var(--text-dim); padding: 4px 0 8px; }
-        .evidence-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 15px; }
+        /* ───────── 근거 카드(네트워크 / 프롬프트) ───────── */
+        .evidence-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+        .evidence-group { background: var(--panel); border: 1px solid var(--border); border-top: 2px solid var(--line-accent, var(--border)); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
+        .evidence-group--embedded { background: transparent; border: none; border-top: 1px solid var(--border); border-radius: 0; padding: 14px 0 0; margin-top: 16px; }
+        .evidence-group--embedded .evidence-group__head { font-size: 13.5px; color: var(--text-dim); margin-bottom: 10px; }
+        .company-breakdown__col.company-breakdown__col--accent { border-top: 2px solid var(--line-accent, var(--border)); }
+        .evidence-group__head { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; color: var(--text); margin-bottom: 12px; flex-wrap: wrap; }
+        .evidence-group__count { margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--text-mute); }
+        .evidence-empty { font-size: 13.5px; color: var(--text-mute); padding: 4px 0 8px; }
+        .evidence-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
         .evidence-item { display: flex; align-items: flex-start; gap: 9px; }
         .evidence-item__text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
         .evidence-item__row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .evidence-item__label { font-size: 13.5px; font-weight: 500; display: flex; align-items: center; gap: 7px; }
-        .evidence-item__code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 700; border: 1px solid currentColor; border-radius: 4px; padding: 1px 5px; color: var(--accent); }
-        .evidence-item__detail { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
-        .evidence-item--hit { border-left: 3px solid; padding-left: 9px; }
-        .evidence-item--compact { align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); }
-        .evidence-item--compact .evidence-item__code { color: var(--text-dim); }
+        .evidence-item__label { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+        .evidence-item__code { font-family: var(--mono); font-size: 11.5px; font-weight: 700; border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; color: var(--accent); }
+        .evidence-item__detail { font-size: 13px; color: var(--text-dim); margin-top: 2px; line-height: 1.55; }
+        .evidence-item--hit { border-left: 3px solid; padding-left: 10px; }
+        .evidence-item--compact { align-items: center; gap: 7px; font-size: 13px; color: var(--text-dim); }
+        .evidence-item--compact .evidence-item__code { color: var(--text-mute); }
         .evidence-item__short { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .evidence-item__metric { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; flex-shrink: 0; }
-        .evidence-item__metric-line { font-size: 12.5px; font-weight: 600; margin-top: 3px; }
-        .evidence-note { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line, #E3E5EC); font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
-        .evidence-item__chip { font-size: 11.5px; border: 1px solid; border-radius: 20px; padding: 1px 9px; flex-shrink: 0; }
-        .list-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 6px; font-size: 12px; color: var(--text-dim); text-align: center; }
-        .list-more button { background: var(--tint); border: 1px solid var(--line, #E3E5EC); border-radius: 8px; color: var(--accent); font-size: 12.5px; padding: 7px 14px; cursor: pointer; }
-        .list-more button:disabled { opacity: .6; cursor: default; }
-        .collapse-btn { display: flex; align-items: center; gap: 5px; margin-top: 22px; background: transparent; border: none; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 4px 0; }
+        .evidence-item__metric { font-size: 12px; flex-shrink: 0; color: var(--text-mute); }
+        .evidence-item__metric-line { font-size: 13px; font-weight: 600; margin-top: 3px; }
+        .evidence-note { margin-top: 6px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+        .evidence-item__chip { font-size: 12px; border: 1px solid; border-radius: 20px; padding: 0 9px; flex-shrink: 0; }
+        .collapse-btn { display: flex; align-items: center; gap: 5px; margin-top: 14px; background: transparent; border: none; color: var(--text-mute); font-size: 12.5px; cursor: pointer; padding: 2px 0; }
+        .collapse-btn:hover { color: var(--accent); }
+        .evidence-summary { margin-top: 12px; font-size: 13px; color: var(--text-dim); }
+        .evidence-summary summary { cursor: pointer; color: var(--accent); }
+        .evidence-summary__row { margin-top: 8px; line-height: 1.5; }
+        .evidence-summary__row p { margin: 3px 0 0; font-size: 12.5px; }
 
-        .company-breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
-        .company-breakdown__col { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--panel); min-width: 0; }
-        .company-breakdown__col h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; }
-        .company-breakdown__counts, .company-breakdown__formula { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
-        .company-breakdown__note { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.55; }
-        .company-breakdown__table { max-height: 220px; overflow: auto; margin-top: 8px; }
-        .company-breakdown table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-        .company-breakdown th, .company-breakdown td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--tint); }
-        .company-breakdown th { color: var(--text-dim); font-weight: 600; }
-        .company-breakdown th:first-child { width: 48%; }
+        /* ───────── 구간 요약 카드 ───────── */
+        .window-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+        .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+        .window-card__phase { font-size: 12px; font-weight: 650; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 10px; }
+        .window-card__phase.is-open { color: #8A6100; background: #FEF6D8; }
+        .window-card__when { font-size: 14px; font-weight: 650; }
+        .window-card__who { color: var(--text-dim); }
+        .window-card__formula { display: flex; align-items: stretch; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .window-card__op { align-self: center; font-size: 20px; font-weight: 500; color: var(--text-mute); }
+        .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 1px; background: var(--tint); border: 1px solid transparent; border-radius: 12px; padding: 12px 16px; min-width: 0; }
+        .score-tile--total { background: var(--panel); border-width: 2px; padding: 11px 15px; }
+        .score-tile__label { font-size: 13px; font-weight: 500; color: var(--text-dim); }
+        .score-tile__value { font-size: 32px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
+        .score-tile__value small { font-size: 13.5px; font-weight: 500; color: var(--text-mute); margin-left: 3px; letter-spacing: 0; }
+        .review-badge { display: inline-flex; align-items: center; margin-left: 8px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--tint); color: var(--text); font-size: 12px; font-weight: 700; line-height: 20px; white-space: nowrap; vertical-align: middle; }
+        .hover-tooltip__head .review-badge { margin-left: 0; font-size: 11.5px; line-height: 18px; }
+        .score-tile__sub { font-size: 12.5px; color: var(--text-mute); }
+        .window-card__extra { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .window-card__source { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+        .window-card__source > span:first-child { color: var(--text-mute); flex-shrink: 0; }
+        .window-card__source code { font-size: 12px; color: var(--text-dim); background: var(--tint); border-radius: 6px; padding: 2px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .window-card__muted { color: var(--text-mute); flex-shrink: 0; }
+        .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
+        .window-card__occurrence > span:first-child { color: var(--text-mute); }
+        .window-card__occurrence b { font-weight: 600; background: var(--tint); border: 1px solid var(--border); border-radius: 999px; padding: 0 9px; }
+        .window-card__occurrence b.is-repeat { background: #FEF6D8; border-color: #EAB308; }
+        .window-card__reason { margin: 10px 0 0; font-size: 13px; color: #8A6100; }
+        .window-card__notes { margin-top: 10px; font-size: 12.5px; color: var(--text-mute); }
+        .window-card__notes summary { cursor: pointer; }
+        .window-card__notes ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
+
+        /* ───────── 점수 구성 표 ───────── */
+        .company-breakdown { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+        .company-breakdown--single { grid-template-columns: minmax(0, 1fr); }
+        .company-breakdown__col { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; background: var(--panel); min-width: 0; }
+        .company-breakdown__col h4 { font-size: 14px; font-weight: 650; margin: 0 0 4px; }
+        .company-breakdown__counts, .company-breakdown__formula { margin: 0 0 8px; font-size: 13px; color: var(--text-dim); }
+        .company-breakdown__formula { color: var(--text); font-weight: 600; line-height: 1.55; }
+        .company-breakdown__note { margin: 6px 0 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.6; }
+        .company-breakdown__table { max-height: 340px; overflow-y: auto; overflow-x: hidden; margin-top: 6px; }
+        .company-breakdown table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+        .company-breakdown th, .company-breakdown td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--tint); vertical-align: middle; }
+        .company-breakdown th { color: var(--text-mute); font-weight: 500; font-size: 12.5px; position: sticky; top: 0; background: var(--panel); }
         .company-breakdown td { white-space: nowrap; }
-        .company-breakdown td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
+        .company-breakdown th.c-user, .company-breakdown td.c-user { width: 64px; }
+        .company-breakdown th.c-num, .company-breakdown td.c-num { width: 72px; text-align: right; }
+        .company-breakdown th.c-state, .company-breakdown td.c-state { width: 52px; }
+        .company-breakdown th.c-idcol { width: 26%; }
+        .company-breakdown td.c-rep { white-space: normal; }
+        .rep-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .rep-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--tint); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: 12px; line-height: 20px; color: var(--text-dim); white-space: nowrap; }
+        .rep-chip b { font-weight: 700; color: var(--text); }
+        .rep-chip.is-repeat { background: #FEF6D8; border-color: #EAB308; }
+        .rep-chip--warn { background: #FBEDEB; border-color: #EFC1BC; color: #8E2A20; }
+        .c-muted { color: var(--text-mute); }
+        .company-breakdown__table + .collapse-btn { margin-top: 8px; }
+        .company-breakdown--single th.c-num, .company-breakdown--single td.c-num { width: 112px; white-space: nowrap; }
+        .company-breakdown th.c-grade, .company-breakdown td.c-grade { width: 90px; }
+        .company-breakdown td.c-grade { font-weight: 600; }
+        .company-breakdown td.c-grade i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+        .company-breakdown td.c-id { overflow: hidden; }
+        .c-id__wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .c-id__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+        .fullid { cursor: copy; }
+        .id-tip { position: fixed; z-index: 80; transform: translateY(calc(-100% - 8px)); max-width: min(520px, calc(100vw - 16px)); background: #1F2330; color: #fff; border-radius: 8px; padding: 7px 10px; font-family: var(--mono); font-size: 12px; font-weight: 400; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; pointer-events: none; box-shadow: 0 6px 18px rgba(20,22,30,.25); }
+        .id-tip em { display: block; font-style: normal; font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", sans-serif; font-size: 11.5px; color: #B8BDCB; margin-top: 2px; }
+        .c-tag { flex-shrink: 0; font-size: 11.5px; font-weight: 650; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 6px; margin-left: 6px; }
+        .c-id .c-tag { margin-left: 0; }
+        .c-sub { color: var(--text-mute); margin-left: 4px; }
         .company-breakdown tr.is-max td { background: var(--accent-soft); }
         .company-breakdown tr.is-link { cursor: pointer; }
         .company-breakdown tr.is-link:hover td { background: var(--tint); }
-        .company-breakdown--single { grid-template-columns: 1fr; }
-        .scope-filters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-        .scope-filters select { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px;
-          background: var(--panel); color: var(--text); font-size: 12px; }
-        .company-breakdown ul { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-        .company-breakdown li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
-        .view-tabs { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--border); background: var(--panel); }
-        .view-tabs button { border: none; background: none; padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-        .view-tabs button.is-on { color: var(--accent); border-bottom-color: var(--accent); }
-        .ov { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; }
-        .ov > * { flex-shrink: 0; min-width: 0; }
-        .ov-chart { width: 100%; min-width: 0; }
-        .ov-toolbar { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
-        .ov-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-dim); }
-        .ov-field select { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12.5px; }
-        .ov-legend { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; padding-top: 18px; }
-        .ov-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--text-dim); cursor: pointer; }
-        .ov-chip.is-on { color: var(--text); border-color: #c3c2b7; font-weight: 600; }
-        .ov-chip__grade { font-size: 11px; font-weight: 600; }
-        .ov-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; border: 1px solid transparent; flex-shrink: 0; }
-        .ov-chip:not(.is-on) .ov-swatch { border-color: #c3c2b7; height: 1px; }
-        .ov-hint { font-size: 12px; color: #B58500; }
-        .ov-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-        .ov-card__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; }
-        .ov-card__head span { font-size: 11.5px; color: var(--text-dim); }
-        .ov-empty { padding: 40px 0; text-align: center; color: var(--text-dim); font-size: 13px; }
-        .ov-note { font-size: 11.5px; color: var(--text-dim); }
-        .ov-tip { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.08); font-size: 12px; min-width: 200px; }
-        .ov-tip__time { font-weight: 700; margin-bottom: 6px; }
-        .ov-tip__row { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 8px; align-items: center; padding: 2px 0; }
-        .ov-tip__score { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
-        .ov-tip__hint { margin-top: 6px; color: var(--text-dim); font-size: 11px; }
-        .ov-table-wrap { overflow-x: auto; }
-        .ov-table { border-collapse: collapse; font-size: 12px; width: 100%; }
-        .ov-table th, .ov-table td { padding: 4px 6px; text-align: center; border-bottom: 1px solid var(--tint); white-space: nowrap; }
-        .ov-table thead th { color: var(--text-dim); font-weight: 600; font-variant-numeric: tabular-nums; }
-        .ov-table tbody th, .ov-table thead th:first-child { text-align: left; font-weight: 600; width: 120px; }
-        .ov-rowhead { display: inline-flex; align-items: center; gap: 6px; }
-        .ov-cell { border: 1px solid; background: var(--panel); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
-        .ov-cell:hover { background: var(--tint); }
-        .ov-cell--empty { color: #c3c2b7; }
-        .ov-td--compact, .ov-table .ov-cell--empty { padding: 2px 1px; }
-        .ov-th--compact { padding: 4px 0 !important; font-size: 10.5px; text-align: left !important; overflow: visible; max-width: 14px; }
-        .ov-dot { display: block; width: 12px; height: 14px; border: none; border-radius: 3px; padding: 0; margin: 0 auto; cursor: pointer; }
-        .ov-dot--normal { opacity: .45; }
-        .ov-dot:hover { outline: 2px solid var(--text); outline-offset: 1px; }
-        .ov-dot--static { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; cursor: default; }
-        .ov-keys { margin-left: auto; font-size: 11.5px; color: var(--text-dim); }
-        .clear-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 18px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: #C6362A; font-size: 12px; cursor: pointer; }
-        .clear-btn:hover { background: #FDF1F0; }
-        .clear-panel { margin-top: 2px; border: 1px solid #F1C9C5; background: #FFF8F7; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; min-width: 0; flex: 1 1 520px; }
-        .clear-panel__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .clear-panel__row label { display: inline-flex; align-items: center; gap: 4px; }
-        .clear-panel__row .ghost-btn { margin-left: auto; }
-        .clear-panel__confirm { width: 120px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; }
-        .clear-panel__go { padding: 6px 14px; border: none; border-radius: 6px; background: #C6362A; color: #fff; font-weight: 600; cursor: pointer; }
-        .clear-panel__go:disabled { background: #E5B5B0; cursor: not-allowed; }
-        .clear-panel__hint { color: var(--text-dim); font-size: 11.5px; }
-        .clear-panel__ok { color: #137D57; word-break: break-all; }
-        .clear-panel__err { color: #C6362A; }
-        .window-card { margin-top: 18px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
-        .window-card__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
-        .window-card__phase { font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
-        .window-card__phase.is-open { color: #B58500; }
-        .window-card__when { font-weight: 600; }
-        .window-card__who { color: var(--text-dim); }
-        .window-card__formula { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-        .window-card__op { align-self: center; font-size: 24px; font-weight: 600; color: var(--text-dim); }
-        .score-tile { flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 0; }
-        .score-tile--total { border-width: 2px; }
-        .score-tile__label { font-size: 14px; font-weight: 600; color: var(--text); }
-        .score-tile__value { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
-        .score-tile__value small { font-size: 14px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
-        .score-tile__sub { font-size: 13px; color: var(--text-dim); }
-        .window-card__source { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; min-width: 0; }
-        .window-card__source > span:first-child { color: var(--text-dim); flex-shrink: 0; }
-        .chat-link { font-size: 12px; font-weight: 600; color: #33429A; text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; white-space: nowrap; align-self: center; }
-        .chat-link:hover { background: var(--panel); }
-        .window-card__occurrence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 13px; }
-        .window-card__occurrence > span:first-child { color: var(--text-dim); }
-        .window-card__occurrence b { font-weight: 600; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
-        .window-card__occurrence b.is-repeat { border-color: #EAB308; }
-        .window-card__source code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-        .window-card__muted { color: var(--text-dim); flex-shrink: 0; }
-        .window-card__reason { margin: 10px 0 0; font-size: 12.5px; color: #B58500; }
-        .window-card__notes { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
-        .window-card__notes summary { cursor: pointer; }
-        .window-card__notes ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
-        .llm-box { margin-top: 22px; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; }
-        .llm-box__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; gap: 10px; flex-wrap: wrap; }
-        .llm-box__title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: var(--accent); }
-        .llm-btn { display: flex; align-items: center; gap: 6px; background: var(--accent); border: none; color: #fff; border-radius: 7px; padding: 8px 14px; font-size: 12.5px; cursor: pointer; font-weight: 500; }
+        .breakdown-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13.5px; }
+        .breakdown-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--tint); }
+        .breakdown-list li span { color: var(--text-dim); }
+        .breakdown-list li.is-total { border-bottom: none; border-top: 1px solid var(--border-strong); margin-top: 2px; font-weight: 700; }
+        .breakdown-list li.is-total span { color: var(--text); }
+        .slot-layout { display: flex; gap: 24px; align-items: flex-start; margin-top: 8px; }
+        .slot-layout__table { flex: 1; min-width: 0; margin-top: 0; }
+        .slot-counts { flex: 0 0 288px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .slot-count { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: var(--tint); border-radius: 10px; padding: 10px 12px; }
+        .slot-count--zero { opacity: .55; }
+        .slot-count__num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+        .slot-count__label { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-dim); }
+        .slot-count__label i { width: 6px; height: 6px; border-radius: 50%; }
+        .fold { margin-top: 8px; }
+        .fold > summary { cursor: pointer; font-size: 12.5px; color: var(--text-mute); list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+        .fold > summary::-webkit-details-marker { display: none; }
+        .fold > summary::before { content: "▸"; font-size: 10px; }
+        .fold[open] > summary::before { content: "▾"; }
+        .fold > summary:hover { color: var(--accent); }
+
+        /* ───────── 요약(LLM) 카드 / 하단 ───────── */
+        .evidence-group, .session-row__main, .top-issues, .trend-card { word-break: keep-all; overflow-wrap: anywhere; }
+        .trend-card--note { min-width: 260px; }
+        .trend-card--note p { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+        .llm-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+        .llm-box__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 10px; flex-wrap: wrap; }
+        .llm-box__title { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; color: var(--text); }
+        .llm-btn { display: flex; align-items: center; gap: 6px; background: var(--accent); border: none; color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; font-weight: 500; }
         .llm-btn:hover { background: #2A3785; }
         .llm-btn:disabled { opacity: .55; cursor: default; }
-        .llm-text--clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-        .evidence-group, .session-row__main, .top-issues, .llm-text, .trend-card { word-break: keep-all; overflow-wrap: anywhere; }
-        .trend-card--note { min-width: 260px; }
-        .trend-card--note p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--text-dim); }
-        .evidence-summary { margin-top: 12px; font-size: 12.5px; color: var(--text-dim); }
-        .evidence-summary summary { cursor: pointer; color: var(--accent); }
-        .evidence-summary__row { margin-top: 8px; line-height: 1.5; }
-        .evidence-summary__row p { margin: 3px 0 0; font-size: 12px; }
-        .llm-text { font-size: 13.5px; line-height: 1.7; color: var(--text); }
-        .llm-hint { font-size: 12.5px; color: var(--text-dim); }
-        .llm-meta { display: flex; gap: 8px; align-items: center; margin-top: 9px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
-        .llm-tag { border-radius: 4px; padding: 1px 7px; font-size: 11.5px; font-weight: 600; background: #fff; color: var(--accent); }
+        .llm-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.65; color: var(--text); word-break: keep-all; overflow-wrap: anywhere; }
+        .llm-lines li { padding-left: 12px; border-left: 2px solid var(--border); }
+        .llm-hint { font-size: 13px; color: var(--text-mute); }
+        .llm-meta { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12.5px; color: var(--text-dim); flex-wrap: wrap; }
+        .llm-tag { border-radius: 4px; padding: 0 7px; font-size: 12px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
         .llm-tag--stale { color: #8E5200; background: #FFF1DC; }
-
-        .footnote { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .footnote { padding-top: 4px; font-size: 12.5px; color: var(--text-mute); display: flex; align-items: center; gap: 6px; }
 
         .state-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-dim); padding: 40px; text-align: center; }
         .state-panel b { color: var(--text); font-size: 15px; }
-        .state-panel button { margin-top: 6px; background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+        .state-panel button { margin-top: 6px; background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13.5px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
 
         .skeleton { display: block; background: linear-gradient(90deg, #ECEEF3 25%, #F6F7FA 50%, #ECEEF3 75%); background-size: 200% 100%; animation: shimmer 1.3s infinite; border-radius: 6px; }
         @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -1360,82 +1483,168 @@ export default function RiskDashboard() {
         .skeleton--num { width: 26px; height: 14px; }
         .skeleton-row { display: flex; align-items: center; gap: 10px; padding: 14px 12px; }
 
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        /* ───────── 개요 그래프 ───────── */
+        .ov { padding: 16px 24px 28px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; }
+        .ov > * { flex-shrink: 0; min-width: 0; }
+        .ov-chart { width: 100%; min-width: 0; }
+        .ov-toolbar { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; }
+        .ov-toolbar > .clear-btn { order: 3; margin-left: auto; }
+        .ov-toolbar > .clear-panel { order: 4; flex: 1 1 100%; }
+        .ov-field { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-mute); }
+        .ov-field select { height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; }
+        .ov-legend { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+        .ov-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 12.5px; color: var(--text-mute); cursor: pointer; }
+        .ov-chip:hover { background: var(--tint); }
+        .ov-chip.is-on { color: var(--text); border-color: var(--border-strong); font-weight: 600; }
+        .ov-chip__grade { font-size: 11.5px; font-weight: 600; }
+        .ov-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; border: 1px solid transparent; flex-shrink: 0; }
+        .ov-chip:not(.is-on) .ov-swatch { border-color: var(--border-strong); height: 1px; }
+        .ov-hint { font-size: 12.5px; color: #8A6100; }
+        .ov-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+        .ov-card__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-size: 14px; }
+        .ov-card__head b { font-weight: 650; }
+        .ov-card__head span { font-size: 12.5px; color: var(--text-mute); }
+        .ov-empty { padding: 48px 0; text-align: center; color: var(--text-mute); font-size: 13.5px; }
+        .ov-note { font-size: 12px; color: var(--text-mute); line-height: 1.6; }
+        .ov-card .ov-note { margin-top: 8px; }
+        .ov-tip { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.08); font-size: 12.5px; min-width: 200px; }
+        .ov-tip__time { font-weight: 700; margin-bottom: 6px; }
+        .ov-tip__row { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 8px; align-items: center; padding: 2px 0; }
+        .ov-tip__score { font-weight: 600; text-align: right; }
+        .ov-tip__hint { margin-top: 6px; color: var(--text-mute); font-size: 11.5px; }
+        .ov-table-wrap { overflow-x: auto; }
+        .ov-table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+        .ov-table th, .ov-table td { padding: 5px 6px; text-align: center; border-bottom: 1px solid var(--tint); white-space: nowrap; }
+        .ov-table thead th { color: var(--text-mute); font-weight: 500; }
+        .ov-table tbody th, .ov-table thead th:first-child { text-align: left; font-weight: 600; width: 110px; }
+        .ov-rowhead { display: inline-flex; align-items: center; gap: 6px; }
+        .ov-td--compact, .ov-table .ov-cell--empty { padding: 3px 1px; }
+        .ov-th--compact { padding: 4px 0 !important; font-size: 10.5px; text-align: left !important; overflow: visible; max-width: 14px; }
+        .ov-dot { display: block; width: 12px; height: 14px; border: none; border-radius: 3px; padding: 0; margin: 0 auto; cursor: pointer; }
+        .ov-dot:hover { outline: 2px solid var(--text); outline-offset: 1px; }
+        .ov-cell--empty { color: var(--border-strong); }
+        .ov-dot--normal { opacity: .55; }
+        .ov-dot--lg { width: 34px; height: 22px; border-radius: 7px; }
+        .ov-cell-tip { position: fixed; z-index: 70; transform: translate(-50%, calc(-100% - 8px)); background: #1F2330; color: #fff; border-radius: 8px; padding: 7px 10px; font-size: 12.5px; line-height: 1.5; white-space: nowrap; pointer-events: none; box-shadow: 0 6px 18px rgba(20,22,30,.25); }
+        .ov-cell-tip__review { margin-top: 2px; font-weight: 700; color: #fff; }
+        .ov-cell-tip span { color: #B8BDCB; margin-left: 4px; }
+        .ov-cell-tip i { font-style: normal; font-weight: 700; filter: brightness(1.6); }
+        .ov-dot--static { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; cursor: default; }
+        .ov-keys { margin-left: auto; font-size: 12px; color: var(--text-mute); }
 
+        /* ───────── 기록 비우기 ───────── */
+        .clear-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text-dim); font-size: 12.5px; cursor: pointer; }
+        .clear-btn:hover { background: #FDF1F0; color: #C6362A; border-color: #F1C9C5; }
+        .clear-panel { border: 1px solid #F1C9C5; background: #FFF8F7; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; min-width: 0; }
+        .clear-panel__row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .clear-panel__row label { display: inline-flex; align-items: center; gap: 4px; }
+        .clear-panel__row .ghost-btn { margin-left: auto; }
+        .clear-panel__confirm { width: 120px; height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 8px; font-family: var(--mono); }
+        .clear-panel__go { height: 30px; padding: 0 14px; border: none; border-radius: 8px; background: #C6362A; color: #fff; font-weight: 600; cursor: pointer; }
+        .clear-panel__go:disabled { background: #E5B5B0; cursor: not-allowed; }
+        .clear-panel__hint { color: var(--text-mute); font-size: 12px; }
+        .clear-panel__ok { color: #137D57; word-break: break-all; }
+        .clear-panel__err { color: #C6362A; }
+
+        /* ───────── 반응형 ───────── */
+        @media (max-width: 1360px) {
+          .dash-header__count { display: none; }
+          .company-breakdown { grid-template-columns: minmax(0, 1fr); }
+          .slot-layout { flex-direction: column; }
+          .slot-counts { flex: none; width: 100%; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+        }
+        @media (max-width: 1280px) {
+          .evidence-cols { grid-template-columns: minmax(0, 1fr); }
+        }
         @media (max-width: 1100px) {
           .side { width: 276px; }
-          .detail { padding: 20px; }
+          .detail { padding: 18px 20px 28px; }
           .trend-card { flex-basis: 100%; }
+          .company-breakdown { grid-template-columns: minmax(0, 1fr); }
         }
         @media (max-width: 860px) {
           .dash { height: auto; }
           .dash-body { flex-direction: column; }
           .side { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 340px; }
-          .evidence-cols { flex-direction: column; }
-          .evidence-group:first-child { border-right: none; border-bottom: 1px solid var(--border); }
-          .dash-header { padding: 16px; }
+          .dash-header { padding: 12px 16px; }
+          .dash-header__right { margin-left: 0; justify-content: flex-start; }
           .stale-banner { padding: 9px 16px; }
           .toast-stack { width: calc(100% - 32px); }
+          .ov { padding: 14px 16px 24px; }
         }
         @media (max-width: 520px) {
-          .dash-header__right { width: 100%; justify-content: space-between; }
-          .header-stats { min-width: 0; flex: 1; }
+          .header-stats__row { flex-wrap: wrap; gap: 4px 10px; }
+          .view-tabs { width: 100%; }
+          .view-tabs button { flex: 1; padding: 6px 8px; }
         }
       `}</style>
 
-      <div className="dash__topline" />
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
 
-      <div className="dash-header">
+      <header className="dash-header">
         <div className="dash-header__title">
           <div className="dash-header__icon">
-            <Radio size={17} color="#33429A" />
+            <Radio size={16} color="#fff" />
           </div>
-          <div>
-            사용자·단말별 5분 구간 위험도
+          <div className="dash-header__text">
+            <h1>사용자·단말별 5분 구간 위험도</h1>
             <div className="dash-header__sub">
               <span className={`live-dot ${dotClass}`} />
-              {statusText} · 최근 {events.length} / 전체 {total}건
+              <span>{statusText}</span>
+              <span className="dash-header__count">최근 {events.length} / 전체 {total}건</span>
               {isMock && <span className="demo-chip">DEMO 시나리오</span>}
             </div>
           </div>
         </div>
+
+        {!isMock && (
+          <div className="view-tabs" role="tablist" aria-label="화면 선택">
+            <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "is-on" : ""} onClick={() => setView("overview")}>
+              개요 그래프
+            </button>
+            <button role="tab" aria-selected={view === "detail"} className={view === "detail" ? "is-on" : ""} onClick={() => setView("detail")}>
+              구간 상세 분석{userFilter ? ` · ${userFilter}` : ""}
+            </button>
+          </div>
+        )}
+
         <div className="dash-header__right">
-          <a className="chat-link" href="/chat.html" target="_blank" rel="noopener" title="사내 AI 채팅(recevie)을 새 탭에서 엽니다. 보낸 프롬프트가 이 대시보드에 기록됩니다.">사내 AI 채팅 ↗</a>
-          <div className="header-stats">
+          <div className="header-stats" aria-label="등급별 건수">
             <div className="header-stats__row">
-              <span style={{ color: LEVELS.danger.color }}>위험 {counts.danger}</span>
-              <span style={{ color: LEVELS.warning.color }}>경고 {counts.warning}</span>
-              <span style={{ color: levelText("caution") }}>주의 {counts.caution}</span>
-              <span style={{ color: LEVELS.normal.color }}>정상 {counts.normal}</span>
-              <span style={{ color: LEVELS.pending.color }}>미판정 {counts.pending}</span>
-              <span style={{ color: LEVELS.error.color }}>오류 {counts.error}</span>
+              {[
+                { key: "danger", label: "위험", color: LEVELS.danger.color },
+                { key: "warning", label: "경고", color: LEVELS.warning.color },
+                { key: "caution", label: "주의", color: LEVELS.caution.color },
+                { key: "normal", label: "정상", color: LEVELS.normal.color },
+                { key: "pending", label: "미판정", color: LEVELS.pending.color, hideZero: true },
+                { key: "error", label: "오류", color: LEVELS.error.color, hideZero: true },
+              ].map((g) => (
+                <span key={g.key} className={`stat ${counts[g.key] ? "" : g.hideZero ? "stat--gone" : "stat--zero"}`}>
+                  <i style={{ background: g.color }} />{g.label}<b>{counts[g.key]}</b>
+                </span>
+              ))}
             </div>
             <LevelBar counts={counts} total={events.length || 1} />
           </div>
-          {isMock && !live && (
-            <button className="ghost-btn" onClick={advance} title="시나리오를 한 단계 진행">
-              <StepForward size={13} /> 다음 단계
+          <div className="dash-header__actions">
+            <a className="chat-link" href="/chat.html" target="_blank" rel="noopener" title="사내 AI 채팅(recevie)을 새 탭에서 엽니다. 보낸 프롬프트가 이 대시보드에 기록됩니다.">사내 AI 채팅 ↗</a>
+            {!isMock && view === "detail" && (
+              <button className={`ghost-btn ${testerOpen ? "is-on" : ""}`} onClick={() => setTesterOpen((v) => !v)} aria-expanded={testerOpen} title="프롬프트 직접 테스트">
+                <FlaskConical size={13} /> 프롬프트 테스트
+              </button>
+            )}
+            {isMock && !live && (
+              <button className="ghost-btn" onClick={advance} title="시나리오를 한 단계 진행">
+                <StepForward size={13} /> 다음 단계
+              </button>
+            )}
+            <button className="ghost-btn" onClick={() => setLive((v) => !v)}>
+              {live ? <Pause size={13} /> : <Play size={13} />}
+              {live ? "일시정지" : "재개"}
             </button>
-          )}
-          <button className="ghost-btn" onClick={() => setLive((v) => !v)}>
-            {live ? <Pause size={13} /> : <Play size={13} />}
-            {live ? "일시정지" : "재개"}
-          </button>
+          </div>
         </div>
-      </div>
-
-      {!isMock && (
-        <div className="view-tabs" role="tablist" aria-label="화면 선택">
-          <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "is-on" : ""} onClick={() => setView("overview")}>
-            개요 그래프
-          </button>
-          <button role="tab" aria-selected={view === "detail"} className={view === "detail" ? "is-on" : ""} onClick={() => setView("detail")}>
-            구간 상세 분석{userFilter ? ` · ${userFilter}` : ""}
-          </button>
-        </div>
-      )}
+      </header>
 
       {!isMock && view === "overview" && (
         <RiskOverview key={dateFilter || dates[0]?.date || "none"} apiBase={API_BASE} dates={dates} date={dateFilter || dates[0]?.date || ""}
@@ -1457,10 +1666,9 @@ export default function RiskDashboard() {
       )}
 
       {!isMock && view === "detail" && (
-        <details className="tester-fold">
-          <summary>프롬프트 직접 테스트</summary>
+        <div className="tester-panel" hidden={!testerOpen}>
           <PromptTester apiBase={API_BASE} />
-        </details>
+        </div>
       )}
 
       {(isMock || view === "detail") && <>
@@ -1480,7 +1688,7 @@ export default function RiskDashboard() {
                 <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} aria-label="날짜(KST)">
                   <option value="">전체 날짜</option>
                   {dates.map((d) => (
-                    <option key={d.date} value={d.date}>{d.date} · 사용자 {d.user_count}명 · 구간 {d.window_count}</option>
+                    <option key={d.date} value={d.date}>{d.date} · {d.user_count}명 · {d.window_count}구간</option>
                   ))}
                 </select>
                 <select value={userFilter} onChange={(e) => setUserFilter(e.target.value)} aria-label="사용자">
@@ -1601,49 +1809,44 @@ export default function RiskDashboard() {
           <div className="detail">
             <div className="detail-meta">
               <span className="detail-meta__item">
-                <User size={14} /> <b>{selected.user}</b> · {selected.dept}
+                <User size={14} /> <b>{selected.user}</b> <span className="detail-meta__dim">· {selected.dept}</span>
               </span>
-              <span className="detail-meta__item">
-                <Network size={14} /> {selected.scope === "company" || selected.scope === "user_device" ? "구간 ID" : "세션 ID"} <b>{selected.sessionId ?? selected.id}</b>
+              <span className="detail-meta__item detail-meta__id">
+                <Network size={14} /> <span className="detail-meta__dim">{selected.scope === "company" || selected.scope === "user_device" ? "구간 ID" : "세션 ID"}</span> <FullId as="code" id={selected.sessionId ?? selected.id} />
               </span>
-              <span className="detail-meta__item">
-                <Clock size={14} /> 관측 {selected.connectedAt}
-                {selected.observation_kind === "event" ? " · 개별 이벤트" : <> · 구간 길이{" "}
-                  <b><LiveDuration startedAtMs={selected.startedAtMs} endedAtMs={selected.endedAtMs} /></b>
-                </>}
-              </span>
-            </div>
-
-            {(selected.scope === "company" || selected.scope === "user_device") && (
-              <WindowSummaryCard event={selected} />
-            )}
-
-            {(selected.scope === "company" || selected.scope === "user_device") && <CompanyBreakdown event={selected} />}
-            {selected.scope === "user_device" && (
-              <SameSlotPanel selected={selected} events={events} isMock={isMock}
-                onSelect={(row) => { if (userFilter && row.user !== userFilter) setUserFilter(""); setSelectedId(row.id); }} />
-            )}
-
-            <div className="detail-main">
-              <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />
-              <ConfidenceMeter confidence={selected.confidence} />
-              {(selected.score != null || !selected.isReal) && <div className="trend-card">
-                <div className="trend-card__title">화면 조회 중 점수 변화</div>
-                <ScoreTrendChart
-                  history={history[selected.id] || [selected.score]}
-                  color={LEVELS[eventLevel(selected)].color}
-                />
-              </div>}
-              {selected.score == null && selected.isReal && (
-                <div className="trend-card trend-card--note">
-                  <div className="trend-card__title">통합 등급 미판정</div>
-                  <p>통합 점수·등급은 아직 계산되지 않았습니다. <b>미판정·미탐지는 안전 판정이 아닙니다.</b> 아래는 엔진별 개별 결과입니다.</p>
-                </div>
+              {!hasWindowCard && (
+                <span className="detail-meta__item">
+                  <Clock size={14} /> <span className="detail-meta__dim">관측 {selected.connectedAt}
+                  {selected.observation_kind === "event" ? " · 개별 이벤트" : <> · 구간 길이{" "}
+                    <b><LiveDuration startedAtMs={selected.startedAtMs} endedAtMs={selected.endedAtMs} /></b>
+                  </>}</span>
+                </span>
               )}
             </div>
 
-            <TopIssues event={selected} />
-            {selected.override && (
+            {hasWindowCard && <WindowSummaryCard event={selected} />}
+
+            {(!hasWindowCard || showTrend || (selected.score == null && selected.isReal)) && (
+              <div className="detail-main">
+                {!hasWindowCard && <RiskScoreBadge score={selected.score} level={eventLevel(selected)} />}
+                {showTrend && <div className="trend-card">
+                  <div className="trend-card__title">화면 조회 중 점수 변화</div>
+                  <ScoreTrendChart
+                    history={history[selected.id] || [selected.score]}
+                    color={LEVELS[eventLevel(selected)].color}
+                  />
+                </div>}
+                {selected.score == null && selected.isReal && (
+                  <div className="trend-card trend-card--note">
+                    <div className="trend-card__title">통합 등급 미판정 <ReviewBadge /></div>
+                    <p>통합 점수·등급은 아직 계산되지 않았습니다. <b>미판정·미탐지는 안전 판정이 아닙니다.</b> 아래는 엔진별 개별 결과입니다.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!hasWindowCard && <TopIssues event={selected} />}
+            {selected.override && !hasWindowCard && (
               <div className="override-note" role="note">
                 <ShieldAlert size={14} color={LEVELS.danger.color} />
                 <span>
@@ -1654,26 +1857,14 @@ export default function RiskDashboard() {
             )}
             {selected.processing_state === "processing" && <div className="evidence-empty" role="status">분석 진행 중 · 완료된 엔진 결과부터 표시합니다.</div>}
 
-            <div className="evidence-cols">
-              <EvidenceGroup
-                title={selected.scope === "company" ? "회사 전체 네트워크 · 5분 집계 (N1~N6, 이전 버전)" : "이 사용자·단말 네트워크 · 5분 집계 (N1~N6)"}
-                icon={<Network size={15} color="#5F6372" />}
-                items={selected.network_reasons}
-                accent="#33429A"
-                note="항목 점수는 모델 클래스 확률(%)이며 통합 기여도가 아닙니다."
-                expanded={openSafe.net}
-                onToggle={() => setOpenSafe((s) => ({ ...s, net: !s.net }))}
-              />
-              <EvidenceGroup
-                title="구간 내 최고 점수 프롬프트 분석"
-                icon={<MessageSquareWarning size={15} color="#5F6372" />}
-                items={selected.prompt_reasons}
-                accent="#7A4FB5"
-                note="확률은 라벨 분류 결과이며 위험도 점수가 아닙니다. 항목별 판단 근거는 제공되지 않습니다. 미탐지는 안전 판정이 아닙니다."
-                expanded={openSafe.prompt}
-                onToggle={() => setOpenSafe((s) => ({ ...s, prompt: !s.prompt }))}
-              />
-            </div>
+            {hasWindowCard
+              ? <CompanyBreakdown key={selected.id} event={selected} promptEvidence={evidenceGroups.prompt} networkEvidence={evidenceGroups.net} />
+              : <div className="evidence-cols">{evidenceGroups.net}{evidenceGroups.prompt}</div>}
+
+            {selected.scope === "user_device" && (
+              <SameSlotPanel selected={selected} events={events} isMock={isMock}
+                onSelect={(row) => { if (userFilter && row.user !== userFilter) setUserFilter(""); setSelectedId(row.id); }} />
+            )}
 
             <div className="llm-box">
               <div className="llm-box__head">
@@ -1687,21 +1878,22 @@ export default function RiskDashboard() {
               </div>
               {ex?.status === "done" && (
                 <>
-                  <div className={`llm-text ${exOpen[selected.id] ? "" : "llm-text--clamp"}`}>{ex.text}</div>
-                  {ex.text.length > 220 && (
+                  <ul className="llm-lines">
+                    {(exOpen[selected.id] ? exLines : exLines.slice(0, LLM_PREVIEW_LINES)).map((line, i) => <li key={i}>{line}</li>)}
+                  </ul>
+                  {exLines.length > LLM_PREVIEW_LINES && (
                     <button className="collapse-btn" onClick={() => setExOpen((o) => ({ ...o, [selected.id]: !o[selected.id] }))}>
                       <ChevronDown size={13} style={{ transform: exOpen[selected.id] ? "rotate(180deg)" : "none" }} />
-                      {exOpen[selected.id] ? "요약 접기" : "전체 요약 보기"}
+                      {exOpen[selected.id] ? "요약 접기" : `전체 요약 보기 (${exLines.length}줄)`}
                     </button>
                   )}
+                  {(ex.source === "rule" || exStale) && (
+                    <div className="llm-meta">
+                      {ex.source === "rule" && <span>서버 요약 조회에 실패해 마지막 화면 데이터로 요약했습니다.</span>}
+                      {exStale && <span className="llm-tag llm-tag--stale">분석 결과가 바뀌어 최신 내용과 다를 수 있어요</span>}
+                    </div>
+                  )}
                 </>
-              )}
-              {ex?.status === "done" && (
-                <div className="llm-meta">
-                  <span className="llm-tag">{ex.source === "stored" ? "저장 결과 요약" : ex.source === "demo" ? "데모 요약" : "화면 데이터 요약"}</span>
-                  {ex.source === "rule" && <span>서버 요약 조회에 실패해 마지막 화면 데이터로 요약했습니다.</span>}
-                  {exStale && <span className="llm-tag llm-tag--stale">분석 결과가 바뀌어 최신 내용과 다를 수 있어요</span>}
-                </div>
               )}
               {exLoading && !ex?.text && <div className="llm-hint">근거 데이터를 바탕으로 요약을 만들고 있어요…</div>}
               {!ex && <div className="llm-hint">버튼을 누르면 위 근거 데이터를 바탕으로 자연어 요약을 생성합니다.</div>}

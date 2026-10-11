@@ -65,6 +65,7 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
   // 날짜가 바뀌면 부모가 key로 이 컴포넌트를 새로 만들어 기본 선택으로 돌아갑니다.
   const [picked, setPicked] = useState(null);
   const [hint, setHint] = useState("");
+  const [tip, setTip] = useState(null); // 표의 칸에 마우스를 올렸을 때 바로 뜨는 점수 안내
   const colors = useMemo(() => {
     const present = new Set(ranked.map((u) => u.user));
     if (picked) return Object.fromEntries(Object.entries(picked).filter(([u]) => present.has(u)));
@@ -77,6 +78,13 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
   const ticks = timeTicks(matrix.times);
   const pending = events.filter((e) => e.score == null).length;
   const compact = matrix.times.length > COMPACT_SLOTS;
+
+  const showTip = (e, user, w, t, level) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const half = 90; // 화면 가장자리에서 잘리지 않게 좌우를 맞춥니다
+    const x = Math.min(Math.max(rect.left + rect.width / 2, half), window.innerWidth - half);
+    setTip({ x, y: rect.top, user, device: w.device_id, time: formatHm(t), level, score: formatScore(w.score) });
+  };
 
   const toggle = (user) => {
     if (user in colors) {
@@ -109,9 +117,9 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
     <div className="ov">
       <div className="ov-toolbar">
         <label className="ov-field">
-          <span>날짜(KST)</span>
+          <span>날짜 (KST)</span>
           <select value={date ?? ""} onChange={(e) => onDateChange(e.target.value)}>
-            {dates.map((d) => <option key={d.date} value={d.date}>{d.date} · 사용자 {d.user_count}명 · 구간 {d.window_count}</option>)}
+            {dates.map((d) => <option key={d.date} value={d.date}>{d.date} · {d.user_count}명 · {d.window_count}구간</option>)}
           </select>
         </label>
         <ClearRecords apiBase={apiBase} date={date} onCleared={onCleared} />
@@ -136,7 +144,6 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
       <div className="ov-card">
         <div className="ov-card__head">
           <b>시간대별 사용자 통합 점수</b>
-          <span>점 = 사용자·단말 5분 구간의 통합 점수 · 배경 = 등급 구간 · 빨간 고리 = 강제 위험(합계와 무관하게 위험)</span>
         </div>
         {status === "error" && <div className="ov-empty">불러오지 못했습니다: {error}</div>}
         {status !== "error" && !events.length && <div className="ov-empty">{date ? "이 날짜에 구간이 없습니다." : "수집된 구간이 없습니다."}</div>}
@@ -150,11 +157,11 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
                     label={{ value: `${LEVELS[b.key].label} ${b.y1}~${b.y2 === 100 ? 100 : b.y2 - 1}`, position: "right",
                       fill: levelText(b.key), fontSize: 11, fontWeight: 600 }} />
                 ))}
-                <CartesianGrid vertical={false} stroke="#e1e0d9" strokeDasharray="0" />
+                <CartesianGrid vertical={false} stroke="#ECEEF3" strokeDasharray="0" />
                 <XAxis dataKey="t" type="number" scale="time" domain={[matrix.times[0] - 60000, matrix.times[matrix.times.length - 1] + 60000]}
-                  ticks={ticks} tickFormatter={formatHm} tick={{ fontSize: 11, fill: "#898781" }} stroke="#c3c2b7" />
-                <YAxis domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} tick={{ fontSize: 11, fill: "#898781" }} stroke="#c3c2b7" width={36} />
-                <Tooltip content={<OverviewTooltip matrix={matrix} colors={colors} />} cursor={{ stroke: "#898781", strokeDasharray: "3 3" }} />
+                  ticks={ticks} tickFormatter={formatHm} tick={{ fontSize: 11, fill: "#8B90A0" }} stroke="#D5D8E0" />
+                <YAxis domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} tick={{ fontSize: 11, fill: "#8B90A0" }} stroke="#D5D8E0" width={36} />
+                <Tooltip content={<OverviewTooltip matrix={matrix} colors={colors} />} cursor={{ stroke: "#8B90A0", strokeDasharray: "3 3" }} />
                 {shown.filter((u) => u in colors).flatMap((user) => segments[user].map((key) => (
                   <Line key={key} dataKey={key} name={user} type="linear" stroke={SERIES_COLORS[colors[user]]} strokeWidth={2}
                     connectNulls isAnimationActive={false} dot={dot(user, key)} activeDot={false} />
@@ -163,22 +170,26 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
             </ResponsiveContainer>
           </div>
         )}
-        <div className="ov-note">선은 한 사용자의 활동 구간을 시간 순서로 이은 것입니다(활동이 없던 시간은 건너뛰고, 30분 넘게 비면 끊음).
-          {pending > 0 && ` 미판정 구간 ${pending}개는 점수가 없어 점을 찍지 않습니다(0점으로 그리지 않음). 아래 표에서 확인할 수 있습니다.`}</div>
+        {pending > 0 && <div className="ov-note">미판정 구간 {pending}개는 점수가 없어 점을 찍지 않습니다(0점으로 그리지 않음). 아래 표에서 확인할 수 있습니다.</div>}
+        <details className="fold">
+          <summary>그래프 읽는 법</summary>
+          <div className="ov-note">
+            점 = 사용자·단말 5분 구간의 통합 점수 · 배경 = 등급 구간 · 빨간 고리 = 강제 위험(합계와 무관하게 위험).<br />
+            선은 한 사용자의 활동 구간을 시간 순서로 이은 것입니다(활동이 없던 시간은 건너뛰고, 30분 넘게 비면 끊음).
+          </div>
+        </details>
       </div>
 
       {events.length > 0 && (
         <div className="ov-card">
           <div className="ov-card__head">
             <b>사용자 × 시간대 표</b>
-            <span>칸을 누르면 상세 분석 · 위험한 사용자 순{compact ? " · 칸 색 = 등급(마우스를 올리면 점수)" : ""}</span>
-            {compact && (
-              <span className="ov-keys">
-                {["normal", "caution", "warning", "danger", "pending"].map((g) => (
-                  <span key={g}><i className="ov-dot ov-dot--static" style={{ background: LEVELS[g].color }} />{LEVELS[g].label}</span>
-                ))}
-              </span>
-            )}
+            <span>칸 색 = 등급 · 마우스를 올리면 점수 · 누르면 상세 분석 · 위험한 사용자 순</span>
+            <span className="ov-keys">
+              {["normal", "caution", "warning", "danger", "pending"].map((g) => (
+                <span key={g}><i className={`ov-dot ov-dot--static ov-dot--${g}`} style={{ background: LEVELS[g].color }} />{LEVELS[g].label}</span>
+              ))}
+            </span>
           </div>
           <div className="ov-table-wrap">
             <table className="ov-table">
@@ -200,23 +211,13 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
                       const w = matrix.cell(user, t);
                       if (!w) return <td key={t} className="ov-cell--empty">{compact ? "" : "·"}</td>;
                       const level = eventLevel(w);
-                      if (compact) {
-                        return (
-                          <td key={t} className="ov-td--compact">
-                            <button className={`ov-dot ov-dot--${level}`} onClick={() => onOpenWindow(w)}
-                              style={{ background: LEVELS[level].color }}
-                              title={`${user} · ${w.device_id} · ${formatHm(t)} · ${LEVELS[level].label} ${formatScore(w.score)}`}
-                              aria-label={`${user} ${formatHm(t)} ${LEVELS[level].label} ${formatScore(w.score)}점`} />
-                          </td>
-                        );
-                      }
                       return (
-                        <td key={t}>
-                          <button className="ov-cell" onClick={() => onOpenWindow(w)}
-                            style={{ color: levelText(level), borderColor: LEVELS[level].color, background: level === "caution" ? "#FEF9C3" : undefined }}
-                            title={`${user} · ${w.device_id} · ${formatHm(t)}`}>
-                            <b>{LEVELS[level].label}</b> {formatScore(w.score)}
-                          </button>
+                        <td key={t} className={compact ? "ov-td--compact" : ""}>
+                          <button className={`ov-dot ov-dot--${level} ${compact ? "" : "ov-dot--lg"}`} onClick={() => onOpenWindow(w)}
+                            style={{ background: LEVELS[level].color }}
+                            onMouseEnter={(e) => showTip(e, user, w, t, level)} onMouseLeave={() => setTip(null)}
+                            onFocus={(e) => showTip(e, user, w, t, level)} onBlur={() => setTip(null)}
+                            aria-label={`${user} ${formatHm(t)} ${LEVELS[level].label} ${formatScore(w.score)}점`} />
                         </td>
                       );
                     })}
@@ -228,6 +229,13 @@ export default function RiskOverview({ apiBase, dates, date, onDateChange, versi
         </div>
       )}
       <div className="ov-note">사용자 점수를 합산·평균한 회사 점수는 만들지 않습니다. 점수는 검토 우선순위이며 위반 확정이 아닙니다.</div>
+      {tip && (
+        <div className="ov-cell-tip" style={{ left: tip.x, top: tip.y }} role="tooltip">
+          <b>{tip.user}</b> <span>{tip.device}</span>
+          <div>{tip.time} · <i style={{ color: levelText(tip.level) }}>{LEVELS[tip.level].label} {tip.score}</i></div>
+          {tip.level === "pending" && <div className="ov-cell-tip__review">담당자 확인 요망</div>}
+        </div>
+      )}
     </div>
   );
 }

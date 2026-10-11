@@ -1,17 +1,18 @@
-.prompt-tester { padding: 20px 24px; border-bottom: 1px solid var(--border); background: #fafbff; }
-.prompt-tester h2 { margin: 0 0 6px; font-size: 16px; }
-.prompt-tester p { font-size: 13px; color: #5f6372; margin: 8px 0; }
-.prompt-tester label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
-.prompt-tester textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 78px; border: 1px solid #c8cddc; border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 14px; color: #242735; background: #fff; }
-.prompt-tester textarea:focus-visible { outline: 2px solid #33429a; outline-offset: 2px; }
-.prompt-tester__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 12px; color: #5f6372; }
-.prompt-tester button { border: 0; border-radius: 8px; padding: 10px 18px; background: #33429a; color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.prompt-tester { padding: 16px 24px 20px; background: #fff; }
+.prompt-tester h2 { margin: 0 0 4px; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+.prompt-tester p { font-size: 12.5px; color: #5c6172; margin: 6px 0; line-height: 1.6; }
+.prompt-tester label { display: block; margin: 12px 0 6px; font-size: 12.5px; font-weight: 600; }
+.prompt-tester textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 72px; border: 1px solid #d5d8e0; border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 13.5px; line-height: 1.55; color: #1a1d26; background: #fff; }
+.prompt-tester textarea:focus-visible { outline: 2px solid #33429a; outline-offset: 1px; }
+.prompt-tester__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 12px; color: #8b90a0; }
+.prompt-tester button { border: 0; border-radius: 8px; padding: 7px 14px; background: #33429a; color: white; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.prompt-tester button:hover:not(:disabled) { background: #2a3785; }
 .prompt-tester button:disabled { opacity: .5; cursor: not-allowed; }
 .prompt-tester .prompt-tester__error { color: #ac2920; }
 .prompt-tester__results { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0; margin: 12px 0 0; }
-.prompt-tester__results li { display: flex; flex-direction: column; gap: 7px; background: #fff; border: 1px solid #dce0eb; border-radius: 8px; padding: 12px; font-size: 13px; }
-.prompt-tester__results span { color: #33429a; }
+.prompt-tester__results li { display: flex; flex-direction: column; gap: 6px; background: #f6f7f9; border: 1px solid #e7e9ee; border-radius: 10px; padding: 12px 14px; font-size: 13px; }
+.prompt-tester__results span { color: #33429a; font-weight: 600; }
 .prompt-tester__results .prompt-tester__detected { color: #ad6300; font-weight: 700; }
-.prompt-tester__results small { color: #5f6372; }
+.prompt-tester__results small { color: #8b90a0; font-size: 11.5px; line-height: 1.5; }
 @media (max-width: 860px) { .prompt-tester__results { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .prompt-tester { padding: 16px; } .prompt-tester__results { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .prompt-tester { padding: 14px 16px; } .prompt-tester__results { grid-template-columns: 1fr; } }
