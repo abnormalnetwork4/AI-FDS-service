@@ -1,10 +1,11 @@
 // 기본 개요 화면: 선택한 날짜(KST)의 5분 시간대별 사용자 통합 점수를 사용자마다 다른 선으로 보여 줍니다.
 // 배경 띠는 등급 구간(정상 0~29 / 주의 30~49 / 경고 50~69 / 위험 70~100)입니다.
 // 점이나 표의 칸을 누르면 그 사용자 구간의 상세 분석 화면으로 이동합니다. 점수는 서버 값만 씁니다.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import ClearRecords from "./ClearRecords.jsx";
-import { LEVELS, levelText, eventLevel, fetchEventPage, formatScore, MAX_PAGES, PAGE_SIZE } from "../lib/events.js";
+import { useDayWindows } from "../lib/useDayWindows.js";
+import { LEVELS, levelText, eventLevel, formatScore } from "../lib/events.js";
 import {
   COMPACT_SLOTS, MAX_SERIES, SERIES_COLORS, assignColors, buildMatrix, buildRows, defaultSelection, formatHm, rankUsers, timeTicks,
 } from "../lib/overview.js";
@@ -15,22 +16,6 @@ const BANDS = [
   { key: "warning", y1: 50, y2: 70 },
   { key: "danger", y1: 70, y2: 100 },
 ];
-
-function useDayWindows(apiBase, date, version) {
-  const [state, setState] = useState({ events: [], status: "loading", error: null });
-  useEffect(() => {
-    if (!date) return undefined;
-    const ctrl = new AbortController();
-    // 첫 페이지로 전체 건수를 확인한 뒤 필요한 만큼만 더 읽습니다(최대 2,000건).
-    fetchEventPage(apiBase, ctrl.signal, fetch, 1, { date })
-      .then((first) => first.total <= PAGE_SIZE ? first
-        : fetchEventPage(apiBase, ctrl.signal, fetch, Math.min(MAX_PAGES, Math.ceil(first.total / PAGE_SIZE)), { date }))
-      .then((page) => setState({ events: page.events, status: "ok", error: null }))
-      .catch((error) => { if (!ctrl.signal.aborted) setState((s) => ({ ...s, status: "error", error: error.message })); });
-    return () => ctrl.abort();
-  }, [apiBase, date, version]);
-  return state;
-}
 
 function OverviewTooltip({ active, payload, label, matrix, colors }) {
   if (!active || label == null) return null;
