@@ -2,6 +2,7 @@ import { LEVELS, levelText, MAX_PAGES, PAGE_SIZE, PROMPT_MAX_NOTE, SCOPE_NOTE, e
 import { watchEvents } from "../lib/live.js";
 import PromptTester from "./PromptTester.jsx";
 import RiskOverview from "./RiskOverview.jsx";
+import RiskStatus from "./RiskStatus.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ShieldAlert,
@@ -919,7 +920,7 @@ function SameSlotPanel({ selected, events, isMock, onSelect }) {
 export default function RiskDashboard() {
   const [live, setLive] = useState(true);
   const [testerOpen, setTesterOpen] = useState(false); // 프롬프트 직접 테스트 패널
-  const [view, setView] = useState(USE_MOCK ? "detail" : "overview"); // overview: 기본 그래프, detail: 구간 상세 분석
+  const [view, setView] = useState(USE_MOCK ? "detail" : "status"); // status: 현황(앞단), detail: 구간 상세 분석, overview: 개요 그래프
   const [dateFilter, setDateFilter] = useState(""); // 한국 시간 YYYY-MM-DD, 빈 값은 전체 날짜
   const [userFilter, setUserFilter] = useState(""); // 빈 값은 전체 사용자
   const filters = useMemo(() => ({ date: dateFilter, userId: userFilter }), [dateFilter, userFilter]);
@@ -1104,6 +1105,14 @@ export default function RiskDashboard() {
       ? `${isMock ? "데모 재생" : mode === "stream" ? "이벤트 수신 중" : "실시간 연결 재시도 · 5초 대체 조회"} · 마지막 갱신 ${fmtTime(lastOkAt)}`
       : "갱신 일시정지됨";
   const dotClass = status === "error" ? "live-dot--err" : live && status === "ok" ? "" : "live-dot--off";
+
+  // 현황·개요 화면에서 한 구간을 누르면 그 사용자·날짜로 맞춰 구간 상세 분석을 엽니다.
+  function openWindow(w) {
+    setDateFilter(new Date(w.startedAtMs + 9 * 3600 * 1000).toISOString().slice(0, 10)); // KST 날짜
+    setUserFilter(w.user);
+    setSelectedId(w.id);
+    setView("detail");
+  }
 
   const hasWindowCard = !!selected && (selected.scope === "company" || selected.scope === "user_device"); // 구간 요약 카드가 점수·시간을 이미 보여 줍니다
   const trendPoints = selected ? (history[selected.id] || [selected.score]).filter((v) => v != null).length : 0;
@@ -1532,6 +1541,70 @@ export default function RiskDashboard() {
         .ov-dot--static { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; cursor: default; }
         .ov-keys { margin-left: auto; font-size: 12px; color: var(--text-mute); }
 
+        /* ───────── 현황(앞단) 화면 ───────── */
+        .st { padding: 16px 24px 28px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; }
+        .st > * { flex-shrink: 0; }
+        .st-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .st-bar__sum { font-size: 13px; color: var(--text-dim); }
+        .st-note { font-size: 13.5px; color: var(--text-dim); padding: 24px 4px; }
+
+        .st-bar__sum { display: inline-flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+        .st-bar__chip { display: inline-flex; align-items: center; gap: 5px; }
+        .st-bar__chip i { width: 7px; height: 7px; border-radius: 50%; }
+        .st-bar__chip b { color: var(--text); font-weight: 700; }
+        .st-h { margin: 4px 0 12px; font-size: 15px; font-weight: 600; color: var(--text-dim); }
+        .st-h b { color: var(--text); font-weight: 800; }
+        .st-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+        .st-card { --card-fg: #fff; display: flex; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+        .st-card:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(20,22,30,.14); }
+        .st-card--caution { --card-fg: #3A2E00; }
+        .st-card__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px; background: var(--card-bg); color: var(--card-fg); }
+        .st-card__grade { display: inline-flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+        .st-card__score { font-size: 54px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+        .st-card__score small { font-size: 16px; font-weight: 600; opacity: .85; margin-left: 3px; letter-spacing: 0; }
+        .st-card__noscore { font-size: 17px; font-weight: 700; opacity: .92; }
+        .st-card__body { display: flex; flex-direction: column; gap: 6px; padding: 16px 22px 18px; }
+        .st-card__who { font-size: 17px; }
+        .st-card__who b { font-weight: 800; }
+        .st-card__who span { color: var(--text-dim); }
+        .st-card__review { align-self: flex-start; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--tint); font-size: 12.5px; font-weight: 700; line-height: 22px; }
+        .st-card__find { font-size: 14px; font-weight: 600; color: var(--text); }
+        .st-card__meta { font-size: 13px; color: var(--text-mute); }
+        .st-card__counts { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--text-dim); }
+        .st-card__counts span { display: inline-flex; align-items: center; gap: 5px; }
+        .st-card__counts i { width: 7px; height: 7px; border-radius: 50%; }
+        .st-card__go { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--accent); }
+        .st-rows { margin-top: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px 10px; }
+        .st-h--sub { margin: 0 0 6px; font-size: 14.5px; }
+        .st-rows ul { list-style: none; margin: 0; padding: 0; }
+        .st-rows li + li { border-top: 1px solid var(--tint); }
+        .st-row { display: grid; grid-template-columns: 10px 48px minmax(120px, 0.8fr) minmax(0, 2fr) 96px 58px 16px; align-items: center; gap: 12px; width: 100%; padding: 11px 6px; border: none; border-radius: 8px; background: transparent; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; }
+        .st-row:hover { background: var(--tint); }
+        .st-row__dot { width: 9px; height: 9px; border-radius: 50%; }
+        .st-row__grade { font-weight: 700; }
+        .st-row__who b { font-weight: 650; }
+        .st-row__find { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+        .st-row__review { color: var(--text); }
+        .st-row__time { color: var(--text-mute); font-size: 13px; }
+        .st-row__score { text-align: right; font-weight: 700; font-size: 15px; }
+        .st-row__go { color: var(--text-mute); }
+        .st-more { margin-top: 12px; padding: 8px 4px; border: none; background: transparent; color: var(--text-mute); font-size: 13.5px; cursor: pointer; }
+        .st-more:hover { color: var(--accent); }
+        .st-banner { display: flex; align-items: center; gap: 20px; padding: 28px 32px; border-radius: 18px; color: #fff; background: var(--banner-bg, #137D57); }
+        .st-banner--empty { --banner-bg: var(--panel); color: var(--text-dim); border: 1px solid var(--border); }
+        .st-banner__title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+        .st-banner--empty .st-banner__title { font-size: 20px; color: var(--text); }
+        .st-banner__sub { margin-top: 4px; font-size: 15px; opacity: .95; }
+        .st-calm { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px; }
+        .st-calm > summary { cursor: pointer; font-size: 14px; font-weight: 650; color: var(--text-dim); list-style: none; }
+        .st-calm > summary::-webkit-details-marker { display: none; }
+        .st-calm > summary::before { content: "▸"; display: inline-block; margin-right: 8px; font-size: 11px; color: var(--text-mute); }
+        .st-calm[open] > summary::before { content: "▾"; }
+        .st-calm__chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .st-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 13.5px; cursor: pointer; }
+        .st-chip:hover { background: var(--tint); border-color: var(--border-strong); }
+        .st-chip i { width: 7px; height: 7px; border-radius: 50%; }
+
         /* ───────── 기록 비우기 ───────── */
         .clear-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text-dim); font-size: 12.5px; cursor: pointer; }
         .clear-btn:hover { background: #FDF1F0; color: #C6362A; border-color: #F1C9C5; }
@@ -1572,6 +1645,12 @@ export default function RiskDashboard() {
           .toast-stack { width: calc(100% - 32px); }
           .ov { padding: 14px 16px 24px; }
         }
+        @media (max-width: 720px) {
+          .st { padding: 14px 16px 24px; }
+          .st-board { grid-template-columns: 1fr; }
+          .st-row { grid-template-columns: 10px 44px minmax(0, 1fr) 52px 16px; }
+          .st-row__find, .st-row__time { display: none; }
+        }
         @media (max-width: 520px) {
           .header-stats__row { flex-wrap: wrap; gap: 4px 10px; }
           .view-tabs { width: 100%; }
@@ -1599,11 +1678,14 @@ export default function RiskDashboard() {
 
         {!isMock && (
           <div className="view-tabs" role="tablist" aria-label="화면 선택">
-            <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "is-on" : ""} onClick={() => setView("overview")}>
-              개요 그래프
+            <button role="tab" aria-selected={view === "status"} className={view === "status" ? "is-on" : ""} onClick={() => setView("status")}>
+              현황
             </button>
             <button role="tab" aria-selected={view === "detail"} className={view === "detail" ? "is-on" : ""} onClick={() => setView("detail")}>
               구간 상세 분석{userFilter ? ` · ${userFilter}` : ""}
+            </button>
+            <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "is-on" : ""} onClick={() => setView("overview")}>
+              개요 그래프
             </button>
           </div>
         )}
@@ -1657,12 +1739,13 @@ export default function RiskDashboard() {
               text: `${what}을 지웠습니다.${result.backup ? ` 백업: ${result.backup}` : " (백업 없음)"}` }].slice(-4));
             setDateFilter(""); setUserFilter(""); setSelectedId(null); setScopeVersion((v) => v + 1); refresh();
           }}
-          onOpenWindow={(w) => {
-            setDateFilter(new Date(w.startedAtMs + 9 * 3600 * 1000).toISOString().slice(0, 10)); // KST 날짜
-            setUserFilter(w.user);
-            setSelectedId(w.id);
-            setView("detail");
-          }} />
+          onOpenWindow={openWindow} />
+      )}
+
+      {!isMock && view === "status" && (
+        <RiskStatus apiBase={API_BASE} dates={dates} date={dateFilter || dates[0]?.date || ""}
+          onDateChange={setDateFilter} version={`${lastOkAt?.getTime() ?? 0}:${scopeVersion}`}
+          onOpenWindow={openWindow} />
       )}
 
       {!isMock && view === "detail" && (
